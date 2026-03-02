@@ -1,0 +1,8 @@
+{
+  "name": "Sokratisk AI-Lärare",
+  "description": "En AI-mattelärare som använder kamera och rityta för att guida dig genom matematiska problem.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
