@@ -3,277 +3,37 @@ import { GoogleGenAI, Type, FunctionDeclaration, Modality } from '@google/genai'
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import { Mermaid } from './components/Mermaid';
 import 'katex/dist/katex.min.css';
-import { Camera, PenTool, Square, Trash2, Mic, MicOff, Volume2, VolumeX, BrainCircuit, MessageSquare, Play, Image as ImageIcon } from 'lucide-react';
+import { Mic, MicOff, Volume2, VolumeX, BrainCircuit, Image as ImageIcon, Menu, X, MessageSquare, Pin, PinOff, Send, Trash2, ArrowDown, Edit3, Check } from 'lucide-react';
+
+import { TimelineEvent } from './types';
+import { CameraScanner } from './components/CameraScanner';
+import { DrawingCanvas } from './components/DrawingCanvas';
+
+const markdownComponents = {
+  code({ node, inline, className, children, ...props }: any) {
+    const match = /language-(\w+)/.exec(className || '');
+    if (!inline && match && match[1] === 'mermaid') {
+      return <Mermaid chart={String(children).replace(/\n$/, '')} />;
+    }
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    );
+  }
+};
 
 // Initialize SDK
-const getAI = () => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'DIN_API_NYCKEL_HÄR' });
+const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY || process.env.GEMINI_API_KEY || 'DIN_API_NYCKEL_HÄR' });
 
-// --- Types ---
-type TimelineEvent = {
-  id: string;
-  timestamp: number;
-  type: 'user_image' | 'teacher_image' | 'expert_note';
-  source?: 'typed' | 'spoken';
-  content: string;
-};
+type PaneType = 'draw' | 'camera' | 'board' | 'plan';
 
-// --- Components ---
-
-const CameraScanner = ({ onCapture }: { onCapture: (base64: string) => void }) => {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isActive, setIsActive] = useState(false);
-
-  useEffect(() => {
-    let stream: MediaStream | null = null;
-    let animationFrameId: number;
-    let lastImageData: ImageData | null = null;
-    let stableStartTime: number | null = null;
-
-    const startCamera = async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          setIsActive(true);
-        }
-      } catch (err) {
-        console.error("Kunde inte starta kameran", err);
-      }
-    };
-
-    const processFrame = () => {
-      if (!videoRef.current || !canvasRef.current || !isActive) return;
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      if (!ctx || video.videoWidth === 0) {
-        animationFrameId = requestAnimationFrame(processFrame);
-        return;
-      }
-
-      canvas.width = 100;
-      canvas.height = 100 * (video.videoHeight / video.videoWidth);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-
-      let totalLuma = 0;
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        totalLuma += 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      }
-      const avgLuma = totalLuma / (data.length / 4);
-
-      let mse = 0;
-      if (lastImageData) {
-        const lastData = lastImageData.data;
-        for (let i = 0; i < data.length; i += 4) {
-          const diffR = data[i] - lastData[i];
-          const diffG = data[i + 1] - lastData[i + 1];
-          const diffB = data[i + 2] - lastData[i + 2];
-          mse += (diffR * diffR + diffG * diffG + diffB * diffB) / 3;
-        }
-        mse /= (data.length / 4);
-      }
-      lastImageData = imageData;
-
-      const isPaper = avgLuma > 150;
-      const isStable = mse < 50;
-
-      if (isPaper && isStable) {
-        if (!stableStartTime) {
-          stableStartTime = Date.now();
-        } else if (Date.now() - stableStartTime > 1000) {
-          const hiResCanvas = document.createElement('canvas');
-          hiResCanvas.width = video.videoWidth;
-          hiResCanvas.height = video.videoHeight;
-          const hiResCtx = hiResCanvas.getContext('2d');
-          if (hiResCtx) {
-            hiResCtx.drawImage(video, 0, 0);
-            const base64 = hiResCanvas.toDataURL('image/jpeg', 0.8);
-            onCapture(base64);
-            stableStartTime = null;
-            setTimeout(() => { lastImageData = null; }, 2000);
-          }
-        }
-      } else {
-        stableStartTime = null;
-      }
-
-      animationFrameId = requestAnimationFrame(processFrame);
-    };
-
-    startCamera().then(() => {
-      animationFrameId = requestAnimationFrame(processFrame);
-    });
-
-    return () => {
-      if (stream) stream.getTracks().forEach(track => track.stop());
-      cancelAnimationFrame(animationFrameId);
-    };
-  }, [isActive, onCapture]);
-
-  return (
-    <div className="relative w-full h-full bg-slate-900 rounded-2xl overflow-hidden flex items-center justify-center shadow-inner">
-      <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-      <canvas ref={canvasRef} className="hidden" />
-      <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-md text-white px-4 py-2 rounded-full text-xs font-medium flex items-center gap-2 shadow-lg border border-white/10">
-        <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
-        Auto-Scanner Aktiv
-      </div>
-    </div>
-  );
-};
-
-const DrawingCanvas = ({ onCapture, selectedImage }: { onCapture: (base64: string) => void, selectedImage?: string | null }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const resize = () => {
-      const parent = canvas.parentElement;
-      if (parent) {
-        canvas.width = parent.clientWidth;
-        canvas.height = parent.clientHeight;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
-    };
-    resize();
-    window.addEventListener('resize', resize);
-    return () => window.removeEventListener('resize', resize);
-  }, []);
-
-  useEffect(() => {
-    if (selectedImage && canvasRef.current) {
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        const img = new Image();
-        img.onload = () => {
-          const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
-          const x = (canvas.width / 2) - (img.width / 2) * scale;
-          const y = (canvas.height / 2) - (img.height / 2) * scale;
-          
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
-        };
-        img.src = selectedImage;
-      }
-    }
-  }, [selectedImage]);
-
-  const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-
-    const rect = canvas.getBoundingClientRect();
-    ctx.beginPath();
-    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
-    setIsDrawing(true);
-  };
-
-  const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const rect = canvas.getBoundingClientRect();
-    ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 4;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-  };
-
-  const stopDrawing = () => {
-    if (!isDrawing) return;
-    setIsDrawing(false);
-
-    timeoutRef.current = setTimeout(() => {
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const base64 = canvas.toDataURL('image/jpeg', 0.8);
-        onCapture(base64);
-      }
-    }, 2000);
-  };
-
-  const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-  };
-
-  return (
-    <div className="relative w-full h-full bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-      <canvas
-        ref={canvasRef}
-        className="w-full h-full touch-none cursor-crosshair"
-        onPointerDown={startDrawing}
-        onPointerMove={draw}
-        onPointerUp={stopDrawing}
-        onPointerOut={stopDrawing}
-      />
-      <button
-        onClick={clearCanvas}
-        className="absolute top-4 right-4 bg-white border border-slate-200 p-2.5 rounded-xl shadow-sm hover:bg-slate-50 text-slate-500 transition-colors"
-        title="Rensa tavlan"
-      >
-        <Trash2 size={20} />
-      </button>
-    </div>
-  );
-};
-
-const TextInput = ({ onSend, initialText = '' }: { onSend: (text: string) => void, initialText?: string }) => {
-  const [text, setText] = useState(initialText);
-
-  useEffect(() => {
-    setText(initialText);
-  }, [initialText]);
-
-  return (
-    <div className="w-full h-full bg-white rounded-2xl border border-slate-200 p-4 flex flex-col shadow-sm">
-      <textarea 
-        className="flex-1 resize-none outline-none text-slate-700 p-2" 
-        placeholder="Skriv din fråga eller ekvation här..."
-        value={text}
-        onChange={e => setText(e.target.value)}
-      />
-      <div className="flex justify-end mt-2">
-        <button 
-          onClick={() => { if(text.trim()) { onSend(text); setText(''); } }}
-          className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-medium hover:bg-indigo-700 transition-colors"
-        >
-          Lägg till i tidslinjen
-        </button>
-      </div>
-    </div>
-  );
+type PaneState = {
+  id: 1 | 2;
+  type: PaneType;
+  data?: any;
 };
 
 // --- Main App ---
@@ -282,30 +42,59 @@ export default function App() {
   const [hasStarted, setHasStarted] = useState(false);
   const [selectedRole, setSelectedRole] = useState('Lärare');
   const [customRole, setCustomRole] = useState('');
-  const [leftMode, setLeftMode] = useState<'draw' | 'camera' | 'text'>('draw');
-  const [rightMode, setRightMode] = useState<'board' | 'plan'>('board');
+  
+  const [pane1, setPane1] = useState<PaneState>({ id: 1, type: 'draw' });
+  const [pane2, setPane2] = useState<PaneState>({ id: 2, type: 'board' });
+  const [activePaneId, setActivePaneId] = useState<1 | 2>(1);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isPinned, setIsPinned] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [isEditingPlan, setIsEditingPlan] = useState(false);
+  const [editedPlan, setEditedPlan] = useState('');
+  const boardScrollRef = useRef<HTMLDivElement>(null);
+  const planScrollRef = useRef<HTMLDivElement>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [showPlanScrollButton, setShowPlanScrollButton] = useState(false);
+
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [isLive, setIsLive] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [pendingImageToLoad, setPendingImageToLoad] = useState<string | null>(null);
-  const [pendingTextToEdit, setPendingTextToEdit] = useState<string>('');
-  const [selectedAnalysis, setSelectedAnalysis] = useState<string | null>(null);
-  const [isTeacherMuted, setIsTeacherMuted] = useState(false);
+  const [isTeacherMuted, setIsTeacherMuted] = useState(true);
   const [isUserMuted, setIsUserMuted] = useState(false);
 
-  const isTeacherMutedRef = useRef(false);
+  const isTeacherMutedRef = useRef(true);
   const isUserMutedRef = useRef(false);
   const roleRef = useRef('Lärare');
   const customRoleRef = useRef('');
+  const activePaneIdRef = useRef<1 | 2>(1);
+  const pane1Ref = useRef(pane1);
+  const pane2Ref = useRef(pane2);
 
   useEffect(() => {
     roleRef.current = selectedRole;
     customRoleRef.current = customRole;
   }, [selectedRole, customRole]);
 
+  useEffect(() => {
+    activePaneIdRef.current = activePaneId;
+  }, [activePaneId]);
+
+  useEffect(() => {
+    pane1Ref.current = pane1;
+  }, [pane1]);
+
+  useEffect(() => {
+    pane2Ref.current = pane2;
+  }, [pane2]);
+
   const toggleTeacherMute = () => {
     isTeacherMutedRef.current = !isTeacherMutedRef.current;
     setIsTeacherMuted(isTeacherMutedRef.current);
+    if (isTeacherMutedRef.current) {
+      activeSourcesRef.current.forEach(source => source.stop());
+      activeSourcesRef.current = [];
+      nextAudioTimeRef.current = 0;
+    }
   };
 
   const toggleUserMute = () => {
@@ -313,9 +102,29 @@ export default function App() {
     setIsUserMuted(isUserMutedRef.current);
   };
 
-  const handleImageClick = useCallback((base64: string) => {
-    setLeftMode('draw');
-    setPendingImageToLoad(base64);
+  const setPaneType = (type: PaneType) => {
+    if (activePaneId === 1) setPane1(prev => ({ ...prev, type }));
+    else setPane2(prev => ({ ...prev, type }));
+  };
+
+  const showInInactivePane = useCallback((type: PaneType, data: any, append: boolean = false) => {
+    const p1 = pane1Ref.current;
+    const p2 = pane2Ref.current;
+    
+    if (append) {
+      if (p1.type === type) {
+        setPane1({ ...p1, data: { ...data, content: p1.data?.content ? p1.data.content + '\n\n---\n\n' + data.content : data.content } });
+        return;
+      }
+      if (p2.type === type) {
+        setPane2({ ...p2, data: { ...data, content: p2.data?.content ? p2.data.content + '\n\n---\n\n' + data.content : data.content } });
+        return;
+      }
+    }
+    
+    const targetPaneId = activePaneIdRef.current === 1 ? 2 : 1;
+    if (targetPaneId === 1) setPane1({ id: 1, type, data });
+    else setPane2({ id: 2, type, data });
   }, []);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -352,17 +161,15 @@ export default function App() {
     if (deepInactivityTimerRef.current) clearTimeout(deepInactivityTimerRef.current);
 
     inactivityTimerRef.current = setTimeout(() => {
-      if (isLiveRef.current) {
-        if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
-        if (audioCtxRef.current) audioCtxRef.current.close();
-        if (sessionRef.current) {
-          sessionRef.current.then((session: any) => session.close());
-          sessionRef.current = null;
-        }
-        setIsLive(false);
-        addTimelineEvent('expert_note', '*Lektionen har pausats automatiskt på grund av inaktivitet. Klicka på "Återuppta Lektion" för att fortsätta.*');
+      if (isLiveRef.current && !isTeacherMutedRef.current) {
+        isTeacherMutedRef.current = true;
+        setIsTeacherMuted(true);
+        activeSourcesRef.current.forEach(source => source.stop());
+        activeSourcesRef.current = [];
+        nextAudioTimeRef.current = 0;
+        addTimelineEvent('expert_note', '*Rösten har pausats automatiskt på grund av 5 minuters inaktivitet. Prata eller klicka på högtalarikonen för att slå på den igen.*');
       }
-    }, 3 * 60 * 1000);
+    }, 5 * 60 * 1000);
 
     deepInactivityTimerRef.current = setTimeout(() => {
       if (isLiveRef.current) {
@@ -377,62 +184,45 @@ export default function App() {
       setHasStarted(false);
       setTimeline([]);
       sessionHandleRef.current = null;
-    }, 15 * 60 * 1000);
+    }, 30 * 60 * 1000);
   }, [addTimelineEvent]);
 
-  const handleCapture = useCallback(async (base64: string) => {
-    const images = timelineRef.current.filter(e => e.type === 'user_image');
-    if (images.length > 0 && images[images.length - 1].content === base64) return;
-    addTimelineEvent('user_image', base64);
-    resetInactivityTimer();
+  const deleteTimelineEvent = useCallback((id: string) => {
+    setTimeline(prev => prev.filter(event => event.id !== id));
+  }, []);
 
-    if (isLiveRef.current && sessionRef.current) {
-      sessionRef.current.then((session: any) => {
-        session.sendRealtimeInput({ media: { mimeType: 'image/jpeg', data: base64.split(',')[1] } });
+  const handleBoardScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLDivElement;
+    const isAtBottom = Math.abs(target.scrollHeight - target.clientHeight - target.scrollTop) < 10;
+    setShowScrollButton(!isAtBottom);
+  };
+
+  const scrollToBoardBottom = () => {
+    if (boardScrollRef.current) {
+      boardScrollRef.current.scrollTo({
+        top: boardScrollRef.current.scrollHeight,
+        behavior: 'smooth'
       });
     }
+  };
 
-    const summary = await callVisionAPI("Användaren har precis ritat/visat detta. Analysera det.", [base64]);
-    
-    if (isLiveRef.current && sessionRef.current) {
-      sessionRef.current.then((session: any) => {
-        session.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text: `[Systemmeddelande: Experten har automatiskt analyserat användarens senaste bild och säger: ${summary} Agera på detta om det är relevant för er konversation.]` }] }],
-          turnComplete: true
-        });
+  const handlePlanScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLDivElement;
+    const isAtBottom = Math.abs(target.scrollHeight - target.clientHeight - target.scrollTop) < 10;
+    setShowPlanScrollButton(!isAtBottom);
+  };
+
+  const scrollToPlanBottom = () => {
+    if (planScrollRef.current) {
+      planScrollRef.current.scrollTo({
+        top: planScrollRef.current.scrollHeight,
+        behavior: 'smooth'
       });
     }
-  }, [addTimelineEvent, resetInactivityTimer]);
+  };
 
-  const handleTextSend = useCallback(async (text: string) => {
-    setLeftMode('text');
-    setPendingTextToEdit('');
-    resetInactivityTimer();
-
-    if (isLiveRef.current && sessionRef.current) {
-      sessionRef.current.then((session: any) => {
-        session.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text }] }],
-          turnComplete: true
-        });
-      });
-    }
-
-    const roleName = roleRef.current === 'Annan' ? customRoleRef.current : roleRef.current;
-    const summary = await callVisionAPI(`Användaren skrev precis detta: "${text}". Analysera det i kontexten av din roll som ${roleName}.`, []);
-    
-    if (isLiveRef.current && sessionRef.current) {
-      sessionRef.current.then((session: any) => {
-        session.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text: `[Systemmeddelande: Experten har analyserat elevens text och säger: ${summary}]` }] }],
-          turnComplete: true
-        });
-      });
-    }
-  }, [addTimelineEvent, resetInactivityTimer]);
-
-  // FAST Expert Model (Gemini 3 Flash)
-  const callVisionAPI = async (question: string, images: string[]) => {
+  // Expert Model with Classifier Routing
+  const callVisionAPI = async (question: string, images: string[], thinkingLevel?: string) => {
     setIsProcessing(true);
 
     try {
@@ -441,29 +231,81 @@ export default function App() {
       }));
 
       const roleName = roleRef.current === 'Annan' ? customRoleRef.current : roleRef.current;
+      
+      // 1. Classify complexity using Flash-Lite
+      let isComplex = thinkingLevel === 'high';
+      
+      if (!isComplex) {
+        try {
+          const classifierPrompt = `Bedöm komplexiteten i följande fråga/bild. Svara EXAKT med ett JSON-objekt: {"complexity": "simple"} eller {"complexity": "complex"}. Använd "complex" för svår matte, fysik, djupgående analys eller avancerad logik. Använd "simple" för allmänna frågor, enkel matte, hälsningar eller grundläggande förklaringar. Fråga: "${question}"`;
+          
+          const classifierRes = await getAI().models.generateContent({
+            model: 'gemini-3.1-flash-lite-preview',
+            contents: { role: 'user', parts: [...parts, { text: classifierPrompt }] },
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: { complexity: { type: Type.STRING } }
+              }
+            }
+          });
+          const result = JSON.parse(classifierRes.text || '{}');
+          isComplex = result.complexity === 'complex';
+          console.log("Classifier determined complexity:", isComplex ? "complex" : "simple");
+        } catch (e) {
+          console.warn("Classifier failed, defaulting to simple", e);
+        }
+      }
+
+      // 2. Prepare the actual request
       parts.push({
-        text: `Du är "Experten", en snabb AI-assistent som stödjer en ${roleName}. Användaren frågar/säger: "${question}". Analysera detta${images.length > 0 ? ' och bilderna' : ''}. Returnera ett JSON-objekt med: 1. "chat_message": Dina anteckningar/formler/svar (Markdown/LaTeX). 2. "live_summary": En kort sammanfattning till röst-AI:n.`
+        text: `Du är "Experten", en snabb AI-assistent som stödjer en ${roleName}. Användaren frågar/säger: "${question}". Analysera detta${images.length > 0 ? ' och bilderna' : ''}. Returnera ett JSON-objekt med: 1. "chat_message": Dina anteckningar/formler/svar (Markdown/LaTeX). Om du ritar grafer, använd Mermaid.js syntax inom markdown kodblock (t.ex. \`\`\`mermaid ... \`\`\`). 2. "live_summary": En kort sammanfattning till röst-AI:n. Svara på svenska och använd korrekt teckenkodning för å, ä, ö.`
       });
 
-      const response = await getAI().models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: { role: 'user', parts },
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              chat_message: { type: Type.STRING },
-              live_summary: { type: Type.STRING }
-            }
+      const config: any = {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            chat_message: { type: Type.STRING },
+            live_summary: { type: Type.STRING }
           }
         }
-      });
+      };
+
+      if (thinkingLevel === 'high' || thinkingLevel === 'low') {
+        config.thinkingConfig = { thinkingLevel };
+      }
+
+      // 3. Route to appropriate model with graceful fallback
+      let response;
+      const targetModel = isComplex ? 'gemini-3.1-pro-preview' : 'gemini-3-flash-preview';
+      
+      try {
+        response = await getAI().models.generateContent({
+          model: targetModel,
+          contents: { role: 'user', parts },
+          config
+        });
+      } catch (error: any) {
+        if (isComplex) {
+          console.warn(`Model ${targetModel} failed (likely quota), falling back to gemini-3-flash-preview...`, error);
+          response = await getAI().models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: { role: 'user', parts },
+            config
+          });
+        } else {
+          throw error;
+        }
+      }
 
       const resultText = response.text;
       if (resultText) {
         const result = JSON.parse(resultText);
         addTimelineEvent('expert_note', result.chat_message);
+        showInInactivePane('board', { content: result.chat_message, isAnalysis: true });
         return result.live_summary;
       }
       return "Kunde inte analysera bilden.";
@@ -496,6 +338,7 @@ export default function App() {
       
       if (imageUrl) {
         addTimelineEvent('teacher_image', imageUrl);
+        showInInactivePane('board', { content: imageUrl, isAnalysis: false });
         return "Bilden har ritats och lagts till i tidslinjen.";
       }
       return "Kunde inte generera bilden.";
@@ -507,20 +350,91 @@ export default function App() {
     }
   };
 
-  const toggleLiveSession = async () => {
-    if (isLiveRef.current) {
-      if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
-      if (audioCtxRef.current) audioCtxRef.current.close();
-      if (sessionRef.current) {
-        sessionRef.current.then((session: any) => session.close());
-        sessionRef.current = null;
-      }
-      setIsLive(false);
-      return;
+  const ensureLiveSessionStarted = useCallback(() => {
+    if (!isLiveRef.current) {
+      startLiveSession();
+    }
+  }, []);
+
+  const handleCapture = useCallback(async (base64: string, source: 'camera' | 'draw' = 'camera') => {
+    const images = timelineRef.current.filter(e => e.type === 'user_image');
+    if (images.length > 0 && images[images.length - 1].content === base64) return;
+    addTimelineEvent('user_image', base64);
+    resetInactivityTimer();
+    ensureLiveSessionStarted();
+    
+    if (source === 'camera') {
+      setPane1(prev => prev.type === 'camera' ? { ...prev, type: 'draw' } : prev);
+      setPane2(prev => prev.type === 'camera' ? { ...prev, type: 'draw' } : prev);
     }
 
+    if (isTeacherMutedRef.current) {
+      setIsTeacherMuted(false);
+      isTeacherMutedRef.current = false;
+    }
+
+    if (isLiveRef.current && sessionRef.current) {
+      sessionRef.current.then((session: any) => {
+        session.sendRealtimeInput({ media: { mimeType: 'image/jpeg', data: base64.split(',')[1] } });
+      });
+    }
+
+    const summary = await callVisionAPI("Användaren har precis ritat/visat detta. Analysera det.", [base64]);
+    
+    if (isLiveRef.current && sessionRef.current) {
+      sessionRef.current.then((session: any) => {
+        session.sendClientContent({
+          turns: [{ role: 'user', parts: [{ text: `[Systemmeddelande: Experten har automatiskt analyserat användarens senaste bild och säger: ${summary} Agera på detta om det är relevant för er konversation.]` }] }],
+          turnComplete: true
+        });
+      });
+    }
+  }, [addTimelineEvent, resetInactivityTimer, callVisionAPI, ensureLiveSessionStarted]);
+
+  const handleTextSend = useCallback(async (text: string) => {
+    if (!text.trim()) return;
+    addTimelineEvent('user_text', text, 'typed');
+    setChatInput('');
+    resetInactivityTimer();
+    ensureLiveSessionStarted();
+
+    if (isTeacherMutedRef.current) {
+      setIsTeacherMuted(false);
+      isTeacherMutedRef.current = false;
+    }
+
+    if (isLiveRef.current && sessionRef.current) {
+      sessionRef.current.then((session: any) => {
+        session.sendClientContent({
+          turns: [{ role: 'user', parts: [{ text }] }],
+          turnComplete: true
+        });
+      });
+    }
+
+    const roleName = roleRef.current === 'Annan' ? customRoleRef.current : roleRef.current;
+    const summary = await callVisionAPI(`Användaren skrev precis detta: "${text}". Analysera det i kontexten av din roll som ${roleName}.`, []);
+    
+    if (isLiveRef.current && sessionRef.current) {
+      sessionRef.current.then((session: any) => {
+        session.sendClientContent({
+          turns: [{ role: 'user', parts: [{ text: `[Systemmeddelande: Experten har analyserat elevens text och säger: ${summary}]` }] }],
+          turnComplete: true
+        });
+      });
+    }
+  }, [addTimelineEvent, resetInactivityTimer, callVisionAPI, ensureLiveSessionStarted]);
+
+  const startLiveSession = async () => {
+    if (isLiveRef.current) return;
+
     try {
-      audioCtxRef.current = new AudioContext({ sampleRate: 16000 });
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new AudioContext({ sampleRate: 16000 });
+      }
+      if (audioCtxRef.current.state === 'suspended') {
+        await audioCtxRef.current.resume();
+      }
       nextAudioTimeRef.current = 0;
       activeSourcesRef.current = [];
       streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -530,7 +444,10 @@ export default function App() {
         description: 'Använd när användaren ber dig titta på tavlan eller kameran. Returnerar en analys av vad som syns.',
         parameters: {
           type: Type.OBJECT,
-          properties: { question: { type: Type.STRING, description: 'Användarens fråga' } },
+          properties: { 
+            question: { type: Type.STRING, description: 'Användarens fråga' },
+            thinking_level: { type: Type.STRING, description: 'Hur mycket tänkande som ska användas för analysen ("low" eller "high"). Utelämna för auto.' }
+          },
           required: ['question']
         }
       };
@@ -545,24 +462,49 @@ export default function App() {
         }
       };
 
+      const savePlanDeclaration: FunctionDeclaration = {
+        name: 'save_plan',
+        description: 'Använd för att spara en lektionsplan, minnesanteckningar eller en sammanfattning till användarens "Kom ihåg"-flik.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: { plan_content: { type: Type.STRING, description: 'Innehållet som ska sparas (Markdown).' } },
+          required: ['plan_content']
+        }
+      };
+
+      const writeOnBoardDeclaration: FunctionDeclaration = {
+        name: 'write_on_board',
+        description: 'Använd för att skriva text, matematiska formler (LaTeX) eller rita grafer (Mermaid.js) på tavlan.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: { content: { type: Type.STRING, description: 'Innehållet som ska visas på tavlan (Markdown, LaTeX, eller Mermaid).' } },
+          required: ['content']
+        }
+      };
+
       const historySummary = timelineRef.current.length > 0 
         ? `\n\nTidigare i konversationen har ni pratat om:\n` + timelineRef.current.map(e => {
             if (e.type === 'expert_note') return `Expert/System: ${e.content}`;
             if (e.type === 'user_image') return `[Användaren visade en bild]`;
             if (e.type === 'teacher_image') return `[Du ritade en bild på tavlan]`;
+            if (e.type === 'user_text') return `Användaren: ${e.content}`;
             return '';
           }).filter(Boolean).slice(-15).join('\n')
         : '';
 
       const roleName = roleRef.current === 'Annan' ? customRoleRef.current : roleRef.current;
-      const systemInstruction = `Du är en ${roleName}. Du har tillgång till verktyg för att se vad användaren gör ('analyze_visual_math') och för att rita egna förklaringar ('draw_on_board'). Använd 'analyze_visual_math' när användaren ber dig titta på något. Använd 'draw_on_board' för att visuellt förklara saker. Prata naturligt och vänligt på svenska.` + historySummary;
+      
+      const currentPlan = pane1Ref.current.type === 'plan' ? pane1Ref.current.data?.content : (pane2Ref.current.type === 'plan' ? pane2Ref.current.data?.content : '');
+      const planSummary = currentPlan ? `\n\nNuvarande innehåll i "Kom ihåg / Plan":\n${currentPlan}` : '';
+
+      const systemInstruction = `Du är en ${roleName}. Du är en sokratisk lärare som leder eleven till att lära sig själv snarare än att bara ge facit. Ställ ledande frågor, men fråga inte om varenda liten detalj. Följ den övergripande planen. Du har tillgång till verktyg för att se vad användaren gör ('analyze_visual_math') och för att rita egna förklaringar ('draw_on_board' för bilder, 'write_on_board' för text/grafer/formler). Använd 'save_plan' för att spara viktiga anteckningar eller lektionsplaner. Använd 'analyze_visual_math' när användaren ber dig titta på något. Prata naturligt och vänligt på svenska.` + planSummary + historySummary;
 
       const sessionPromise = getAI().live.connect({
         model: "gemini-2.5-flash-native-audio-preview-09-2025",
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: systemInstruction,
-          tools: [{ functionDeclarations: [analyzeVisualMathDeclaration, drawOnBoardDeclaration] }],
+          tools: [{ functionDeclarations: [analyzeVisualMathDeclaration, drawOnBoardDeclaration, savePlanDeclaration, writeOnBoardDeclaration] }],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } } },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
@@ -613,10 +555,6 @@ export default function App() {
               sessionHandleRef.current = message.sessionResumptionUpdate.newHandle;
             }
 
-            if (message.goAway) {
-              console.log("Session ending soon. Time left:", message.goAway.timeLeft);
-            }
-
             if (message.serverContent?.interrupted) {
               activeSourcesRef.current.forEach(source => source.stop());
               activeSourcesRef.current = [];
@@ -656,7 +594,7 @@ export default function App() {
             if (modelParts) {
               for (const part of modelParts) {
                 if (part.text) {
-                  // addTimelineEvent('teacher_text', part.text); // Removed
+                  addTimelineEvent('teacher_text', part.text);
                 }
                 if (part.functionCall) {
                   const name = part.functionCall.name;
@@ -665,9 +603,17 @@ export default function App() {
                   
                   if (name === 'analyze_visual_math') {
                     const images = timelineRef.current.filter(e => e.type === 'user_image').map(e => e.content);
-                    result = await callVisionAPI(args.question || "Vad ser du?", images);
+                    result = await callVisionAPI(args.question || "Vad ser du?", images, args.thinking_level);
                   } else if (name === 'draw_on_board') {
                     result = await generateTeacherImage(args.prompt);
+                  } else if (name === 'write_on_board') {
+                    showInInactivePane('board', { content: args.content, isAnalysis: true }, true);
+                    addTimelineEvent('expert_note', args.content);
+                    result = "Innehållet har skrivits på tavlan.";
+                  } else if (name === 'save_plan') {
+                    showInInactivePane('plan', { content: args.plan_content }, true);
+                    addTimelineEvent('expert_note', 'Sparade en ny plan i "Kom ihåg".');
+                    result = "Planen har sparats.";
                   }
 
                   sessionPromise.then(session => {
@@ -688,7 +634,11 @@ export default function App() {
               for (const turn of userTurns) {
                 for (const part of turn.parts) {
                   if (part.text && !part.text.startsWith('[Systemmeddelande')) {
-                    // addTimelineEvent('user_text', part.text, 'spoken'); // Removed
+                    addTimelineEvent('user_text', part.text, 'spoken');
+                    if (isTeacherMutedRef.current) {
+                      setIsTeacherMuted(false);
+                      isTeacherMutedRef.current = false;
+                    }
                   }
                 }
               }
@@ -713,6 +663,14 @@ export default function App() {
 
   const handleStart = async () => {
     try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new AudioContext({ sampleRate: 16000 });
+      }
+    } catch (e) {
+      console.warn("AudioContext init failed:", e);
+    }
+
+    try {
       // @ts-ignore
       if (window.aistudio && window.aistudio.hasSelectedApiKey) {
         // @ts-ignore
@@ -726,31 +684,140 @@ export default function App() {
       console.error("API Key selection error:", e);
     }
     setHasStarted(true);
+    startLiveSession();
   };
 
-  const groupedTimeline = useMemo(() => {
-    const grouped: any[] = [];
-
-    for (const event of timeline) {
-      if (event.type === 'expert_note') {
-        const last = grouped[grouped.length - 1];
-        if (last && last.type === 'user_image' && !last.analysis) {
-          last.analysis = event.content;
-          continue;
-        }
-      }
-      grouped.push({ ...event });
-    }
-    return grouped;
-  }, [timeline]);
-
-  const latestBoardItem = [...timeline].reverse().find(e => e.type === 'expert_note' || e.type === 'teacher_image');
+  const renderPane = (state: PaneState, isActive: boolean, onClick: () => void) => {
+    return (
+      <div 
+        onClick={onClick}
+        className={`flex-1 relative rounded-2xl overflow-hidden border-2 transition-all duration-200 flex flex-col cursor-pointer ${isActive ? 'border-indigo-500 shadow-md' : 'border-slate-200 shadow-sm opacity-90 hover:opacity-100'}`}
+      >
+        <div className={`absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-gradient-to-b from-black/50 to-transparent pointer-events-none flex justify-between items-center`}>
+           <span className="text-white text-xs font-bold uppercase tracking-wider drop-shadow-md">
+             {state.type === 'draw' && 'Rita'}
+             {state.type === 'camera' && 'Fota'}
+             {state.type === 'board' && 'Tavla'}
+             {state.type === 'plan' && 'Kom ihåg'}
+           </span>
+           {isActive && <div className="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_8px_rgba(99,102,241,0.8)]" />}
+        </div>
+  
+        <div className="flex-1 relative bg-white">
+          {state.type === 'draw' && <DrawingCanvas onCapture={(base64) => handleCapture(base64, 'draw')} selectedImage={state.data?.image} />}
+          {state.type === 'camera' && <CameraScanner onCapture={(base64) => handleCapture(base64, 'camera')} onClose={() => {
+            if (pane1.id === state.id) setPane1(prev => ({ ...prev, type: 'draw' }));
+            if (pane2.id === state.id) setPane2(prev => ({ ...prev, type: 'draw' }));
+          }} />}
+          {state.type === 'board' && (
+            <div 
+              ref={boardScrollRef}
+              onScroll={handleBoardScroll}
+              className="h-full overflow-y-auto bg-slate-50 p-6 pt-10 relative"
+            >
+              {isProcessing && isActive && (
+                <div className="absolute top-4 right-4 flex items-center gap-2 text-indigo-600 text-sm font-medium animate-pulse bg-white/80 px-3 py-1 rounded-full shadow-sm z-20">
+                  <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                  Arbetar...
+                </div>
+              )}
+              {!state.data ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center gap-4">
+                  <ImageIcon size={48} className="text-slate-300" />
+                  <p className="max-w-[250px] text-sm">Här visas AI:ns anteckningar, formler och genererade grafer.</p>
+                </div>
+              ) : !state.data.isAnalysis ? (
+                <img src={state.data.content} alt="Teacher generated" className="w-full h-auto rounded-xl shadow-sm" />
+              ) : (
+                <div className="prose prose-slate max-w-none pb-12">
+                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>
+                    {state.data.content}
+                  </ReactMarkdown>
+                </div>
+              )}
+              
+              {showScrollButton && state.data && (
+                <button 
+                  onClick={scrollToBoardBottom}
+                  className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-indigo-600 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm font-medium hover:bg-indigo-700 transition-all animate-bounce"
+                >
+                  <ArrowDown size={16} /> Fortsätt
+                </button>
+              )}
+            </div>
+          )}
+          {state.type === 'plan' && (
+            <div 
+              ref={planScrollRef}
+              onScroll={handlePlanScroll}
+              className="h-full overflow-y-auto bg-slate-50 p-6 pt-10 flex flex-col gap-4 relative"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold text-slate-700">Kom ihåg / Plan</h3>
+                {state.data?.content && !isEditingPlan && (
+                  <button 
+                    onClick={() => {
+                      setEditedPlan(state.data.content);
+                      setIsEditingPlan(true);
+                    }}
+                    className="p-2 text-slate-500 hover:bg-slate-200 rounded-lg transition-colors"
+                    title="Redigera plan"
+                  >
+                    <Edit3 size={18} />
+                  </button>
+                )}
+                {isEditingPlan && (
+                  <button 
+                    onClick={() => {
+                      if (activePaneId === 1) setPane1(prev => ({ ...prev, data: { ...prev.data, content: editedPlan } }));
+                      else setPane2(prev => ({ ...prev, data: { ...prev.data, content: editedPlan } }));
+                      setIsEditingPlan(false);
+                      handleTextSend(`Jag har uppdaterat vår plan. Här är den nya versionen:\n\n${editedPlan}`);
+                    }}
+                    className="p-2 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors flex items-center gap-1 text-sm font-medium"
+                  >
+                    <Check size={18} /> Spara
+                  </button>
+                )}
+              </div>
+              {state.data?.content ? (
+                isEditingPlan ? (
+                  <textarea 
+                    value={editedPlan}
+                    onChange={(e) => setEditedPlan(e.target.value)}
+                    className="flex-1 w-full p-4 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-none font-sans text-slate-700"
+                  />
+                ) : (
+                  <div className="prose prose-slate max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{state.data.content}</ReactMarkdown>
+                  </div>
+                )
+              ) : (
+                <>
+                  <p className="text-slate-500 text-sm">Be AI:n att skapa en strukturerad plan för vad ni ska gå igenom, eller skriv dina egna anteckningar här.</p>
+                  <button onClick={() => handleTextSend("Skapa en lektionsplan för detta ämne och spara den i Kom ihåg.")} className="bg-emerald-100 text-emerald-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-200 self-start">Be om plan</button>
+                </>
+              )}
+              
+              {showPlanScrollButton && state.data && (
+                <button 
+                  onClick={scrollToPlanBottom}
+                  className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm font-medium hover:bg-emerald-700 transition-all animate-bounce"
+                >
+                  <ArrowDown size={16} /> Fortsätt
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   if (!hasStarted) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-slate-50 font-sans">
-        <BrainCircuit size={80} className="text-indigo-600 mb-8" />
-        <h1 className="text-5xl font-bold text-slate-800 mb-6 tracking-tight">Sokratisk AI-Assistent</h1>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 font-sans p-4">
+        <h1 className="text-5xl font-bold text-slate-800 mb-6 tracking-tight text-center">Din AI-assistent</h1>
         <p className="text-slate-500 mb-8 max-w-lg text-center text-lg leading-relaxed">
           En interaktiv lärmiljö med röst, vision och generativ grafik. Välj en roll eller börja fritt. Allt sparas i din tidslinje.
         </p>
@@ -794,193 +861,165 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen w-full bg-slate-50 font-sans text-slate-900 overflow-hidden">
+    <div className="flex h-screen w-full bg-slate-50 font-sans text-slate-900 overflow-hidden relative">
       
-      {/* Top Area: 3/4 Height */}
-      <div className="flex h-[75%] w-full border-b border-slate-200 relative">
-        
-        {/* Central Button */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
-          <button
-            onClick={toggleLiveSession}
-            className={`flex items-center justify-center w-24 h-24 rounded-full font-bold text-lg transition-all shadow-2xl border-4 border-slate-50 ${
-              isLive ? 'bg-rose-500 text-white hover:bg-rose-600' : 'bg-indigo-600 text-white hover:bg-indigo-700'
-            }`}
-          >
-            {isLive ? 'Pausa' : 'Starta'}
-          </button>
-        </div>
-
-        {/* Left: Input */}
-        <div className="w-1/2 h-full p-6 flex flex-col gap-4 border-r border-slate-200 bg-slate-50/50">
-          <div className="flex justify-between items-center">
-            <h2 className="font-semibold text-slate-700 flex items-center gap-2">
-              Du
-            </h2>
-            <div className="flex items-center gap-2">
-              <button onClick={toggleUserMute} className={`p-2 rounded-full transition-colors ${isUserMuted ? 'bg-rose-100 text-rose-600' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`} title={isUserMuted ? 'Slå på mikrofon' : 'Stäng av mikrofon'}>
-                {isUserMuted ? <MicOff size={16} /> : <Mic size={16} />}
-              </button>
-              <div className="flex bg-slate-200/50 p-1 rounded-xl">
-                <button onClick={() => setLeftMode('draw')} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${leftMode === 'draw' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>Rita</button>
-                <button onClick={() => setLeftMode('camera')} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${leftMode === 'camera' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>Kamera</button>
-                <button onClick={() => setLeftMode('text')} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${leftMode === 'text' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>Text</button>
-              </div>
-            </div>
-          </div>
-          <div className="flex-1 relative overflow-hidden">
-            {leftMode === 'draw' && <DrawingCanvas onCapture={handleCapture} selectedImage={pendingImageToLoad} />}
-            {leftMode === 'camera' && <CameraScanner onCapture={handleCapture} />}
-            {leftMode === 'text' && <TextInput onSend={handleTextSend} initialText={pendingTextToEdit} />}
+      {/* Sidebar (Chat/Timeline) */}
+      <div className={`${isPinned ? 'relative w-full lg:flex-1' : 'fixed inset-y-0 left-0 z-50 w-80 lg:relative lg:w-80'} bg-white border-r border-slate-200 shadow-2xl lg:shadow-none transform transition-transform duration-300 flex flex-col ${sidebarOpen || isPinned ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+        <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
+          <h2 className="font-bold text-slate-700 flex items-center gap-2">
+            <MessageSquare size={18} className="text-indigo-600" /> Chatt & Historik
+          </h2>
+          <div className="flex items-center gap-1">
+            <button className="hidden lg:flex p-2 text-slate-500 hover:bg-slate-200 rounded-lg" onClick={() => setIsPinned(!isPinned)} title={isPinned ? "Lossa" : "Nåla fast"}>
+              {isPinned ? <PinOff size={18} /> : <Pin size={18} />}
+            </button>
+            <button className="lg:hidden p-2 text-slate-500 hover:bg-slate-200 rounded-lg" onClick={() => setSidebarOpen(false)}>
+              <X size={20} />
+            </button>
           </div>
         </div>
-
-        {/* Right: Board/Focus */}
-        <div className="w-1/2 h-full p-6 bg-white flex flex-col gap-4">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <div className="flex bg-slate-200/50 p-1 rounded-xl">
-                <button onClick={() => setRightMode('board')} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${rightMode === 'board' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500'}`}>Tavla</button>
-                <button onClick={() => setRightMode('plan')} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${rightMode === 'plan' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500'}`}>Plan</button>
-                <button onClick={() => setRightMode('dialog')} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${rightMode === 'dialog' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500'}`}>Lektion</button>
-              </div>
-              <button onClick={toggleTeacherMute} className={`p-2 rounded-full transition-colors ${isTeacherMuted ? 'bg-rose-100 text-rose-600' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`} title={isTeacherMuted ? 'Slå på AI:ns röst' : 'Stäng av AI:ns röst'}>
-                {isTeacherMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-              </button>
-            </div>
-            <h2 className="font-semibold text-slate-700 flex items-center gap-2">
-              {roleRef.current === 'Annan' ? customRoleRef.current : roleRef.current} <BrainCircuit size={18} className="text-emerald-600" />
-            </h2>
-          </div>
-          <div className="flex-1 relative overflow-hidden">
-             {rightMode === 'board' && (
-                <div className="h-full overflow-y-auto bg-slate-50 rounded-2xl border border-slate-100 p-6 relative">
-                  {isProcessing && (
-                    <div className="absolute top-4 right-4 flex items-center gap-2 text-indigo-600 text-sm font-medium animate-pulse bg-white/80 px-3 py-1 rounded-full shadow-sm">
-                      <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                      Arbetar...
-                    </div>
-                  )}
-                  {selectedAnalysis ? (
-                    <div className="prose prose-slate max-w-none">
-                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Analys av din bild</h3>
-                      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                        {selectedAnalysis}
-                      </ReactMarkdown>
-                      <button onClick={() => setSelectedAnalysis(null)} className="mt-6 text-indigo-600 text-sm font-medium">Visa senaste</button>
-                    </div>
-                  ) : (
-                    !latestBoardItem ? (
-                      <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center gap-4">
-                        <ImageIcon size={48} className="text-slate-300" />
-                        <p className="max-w-[250px] text-sm">Här visas AI:ns anteckningar, formler och genererade grafer.</p>
-                      </div>
-                    ) : latestBoardItem.type === 'teacher_image' ? (
-                      <img src={latestBoardItem.content} alt="Teacher generated" className="w-full h-auto rounded-xl shadow-sm" />
-                    ) : (
-                      <div className="prose prose-slate max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                          {latestBoardItem.content}
-                        </ReactMarkdown>
-                      </div>
-                    )
-                  )}
-                </div>
-             )}
-             {rightMode === 'plan' && (
-                <div className="h-full overflow-y-auto bg-slate-50 rounded-2xl border border-slate-100 p-6 flex flex-col gap-4">
-                  <h3 className="text-lg font-bold text-slate-700">Lektionsplan</h3>
-                  <p className="text-slate-500 text-sm">Be AI:n att skapa en strukturerad plan för vad ni ska gå igenom.</p>
-                  <button onClick={() => handleTextSend("Skapa en lektionsplan för detta ämne.")} className="bg-emerald-100 text-emerald-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-200 self-start">Be om lektionsplan</button>
-                </div>
-             )}
-             {rightMode === 'dialog' && (
-                <DialogView timeline={timeline} side="right" roleName={roleRef.current === 'Annan' ? customRoleRef.current : roleRef.current} />
-             )}
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Area: 1/4 Height - Full Width Timeline */}
-      <div className="h-[25%] w-full bg-slate-100 p-6 flex flex-col gap-4">
-        <div className="flex-1 flex gap-4 overflow-x-auto pb-2 items-stretch snap-x">
-          {groupedTimeline.length === 0 ? (
-            <div className="w-full h-full flex items-center justify-center text-slate-400 italic text-sm">
-              Tidslinjen är tom. Börja rita eller prata för att spara historik.
+        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+          {timeline.length === 0 ? (
+            <div className="text-center text-slate-400 italic text-sm mt-10">
+              Chatten är tom. Börja rita eller prata för att spara historik.
             </div>
           ) : (
-            groupedTimeline.map(event => {
-              if (event.type === 'user_image') {
-                return (
-                  <div key={event.id} className="h-full w-64 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col flex-shrink-0 snap-start hover:border-indigo-300 transition-colors overflow-hidden">
-                    <div className="flex items-center justify-between p-3 border-b border-slate-100">
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-slate-100 text-slate-600">
-                        Din Bild
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        {new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                    <div className="flex border-b border-slate-100 text-[10px] font-medium">
-                      <button className="flex-1 py-1.5 bg-slate-50 hover:bg-slate-100 text-center border-r border-slate-100" onClick={() => { setLeftMode('draw'); setPendingImageToLoad(event.content); }}>Din bild</button>
-                      <button className="flex-1 py-1.5 bg-slate-50 hover:bg-slate-100 text-center" onClick={() => { if (event.analysis) { setRightMode('board'); setSelectedAnalysis(event.analysis); } }}>Analys</button>
-                    </div>
-                    <div className="flex-1 p-3 overflow-y-auto cursor-pointer" onClick={() => { setLeftMode('draw'); setPendingImageToLoad(event.content); if (event.analysis) { setRightMode('board'); setSelectedAnalysis(event.analysis); } }}>
-                      <img src={event.content} className="w-full h-24 object-cover rounded-lg mb-2" alt="Timeline item" />
-                      {event.analysis && (
-                        <div className="text-xs prose prose-sm prose-slate line-clamp-3">
-                          <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{event.analysis}</ReactMarkdown>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              }
-
-              return (
-                <div 
-                  key={event.id} 
-                  className="h-full w-64 bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col gap-3 flex-shrink-0 snap-start hover:border-indigo-300 transition-colors cursor-pointer"
-                  onClick={() => {
-                    if (event.type === 'teacher_image') {
-                      setLeftMode('draw');
-                      setPendingImageToLoad(event.content);
-                    } else if (event.type === 'expert_note') {
-                      setRightMode('board');
-                      setSelectedAnalysis(event.content);
-                    }
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md ${
-                      event.type === 'teacher_image' ? 'bg-emerald-100 text-emerald-700' :
-                      event.type === 'expert_note' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-700'
-                    }`}>
-                      {event.type === 'teacher_image' ? 'AI:ns Bild' :
-                       event.type === 'expert_note' ? 'AI:n observerar' : 'Händelse'}
-                    </span>
+            timeline.map(event => (
+              <div 
+                key={event.id} 
+                className={`p-3 rounded-xl shadow-sm border cursor-pointer transition-colors ${
+                  event.type === 'user_image' || event.type === 'user_text' ? 'bg-indigo-50 border-indigo-100 ml-4' : 
+                  'bg-white border-slate-200 mr-4'
+                }`}
+                onClick={() => {
+                  if (window.innerWidth < 1024 && !isPinned) setSidebarOpen(false);
+                  if (event.type === 'user_image') {
+                    setPaneType('draw');
+                    if (activePaneId === 1) setPane1(prev => ({ ...prev, data: { image: event.content } }));
+                    else setPane2(prev => ({ ...prev, data: { image: event.content } }));
+                  } else if (event.type === 'teacher_image') {
+                    setPaneType('board');
+                    if (activePaneId === 1) setPane1(prev => ({ ...prev, data: { content: event.content, isAnalysis: false } }));
+                    else setPane2(prev => ({ ...prev, data: { content: event.content, isAnalysis: false } }));
+                  } else if (event.type === 'expert_note') {
+                    setPaneType('board');
+                    if (activePaneId === 1) setPane1(prev => ({ ...prev, data: { content: event.content, isAnalysis: true } }));
+                    else setPane2(prev => ({ ...prev, data: { content: event.content, isAnalysis: true } }));
+                  }
+                }}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    {event.type === 'user_image' ? 'Du (Bild)' :
+                     event.type === 'user_text' ? 'Du' :
+                     event.type === 'teacher_image' ? 'AI (Bild)' : 'AI'}
+                  </span>
+                  <div className="flex items-center gap-2">
                     <span className="text-[10px] text-slate-400">
                       {new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
-                  </div>
-                  
-                  <div className="flex-1 overflow-y-auto overflow-x-hidden">
-                    {event.type === 'teacher_image' ? (
-                      <img src={event.content} className="w-full h-full object-cover rounded-lg" alt="Timeline item" title="Klicka för att redigera på tavlan" />
-                    ) : event.type === 'expert_note' ? (
-                      <div className="text-xs prose prose-sm prose-slate line-clamp-6">
-                        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{event.content}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-700 italic">"{event.content}"</p>
-                    )}
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); deleteTimelineEvent(event.id); }}
+                      className="text-slate-300 hover:text-rose-500 transition-colors"
+                      title="Radera från historik"
+                    >
+                      <Trash2 size={12} />
+                    </button>
                   </div>
                 </div>
-              );
-            })
+                <div>
+                  {event.type === 'user_image' || event.type === 'teacher_image' ? (
+                    <img src={event.content} className="w-full h-32 object-cover rounded-lg" alt="Chat image" />
+                  ) : event.type === 'expert_note' ? (
+                    <div className="text-base prose prose-slate line-clamp-4">
+                      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{event.content}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="text-base text-slate-700">{event.content}</p>
+                  )}
+                </div>
+              </div>
+            ))
           )}
         </div>
+        
+        {/* Chat Input */}
+        <div className="p-4 border-t border-slate-200 bg-slate-50 shrink-0">
+          <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-xl p-1 shadow-sm focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-all">
+            <input 
+              type="text" 
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleTextSend(chatInput); }}
+              placeholder="Skriv ett meddelande..."
+              className="flex-1 bg-transparent border-none outline-none px-3 py-2 text-slate-700"
+            />
+            <button 
+              onClick={() => handleTextSend(chatInput)}
+              disabled={!chatInput.trim()}
+              className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors"
+            >
+              <Send size={18} />
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* Main Content */}
+      <div className={`${isPinned ? 'flex-[2]' : 'flex-1'} flex flex-col h-full relative min-w-0 transition-all`}>
+        {/* Header / Menu */}
+        <div className="h-16 border-b border-slate-200 bg-white flex items-center justify-between px-4 shrink-0">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+            <button className="lg:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-lg shrink-0" onClick={() => setSidebarOpen(true)}>
+              <Menu size={24} />
+            </button>
+            <div className="flex bg-slate-100 p-1 rounded-xl shrink-0">
+              {(['draw', 'camera', 'board', 'plan'] as PaneType[]).map(type => {
+                const labels = { draw: 'Rita', camera: 'Fota', board: 'Tavla', plan: 'Kom ihåg' };
+                const isActiveInPane1 = pane1.type === type;
+                const isActiveInPane2 = pane2.type === type;
+                const isHighlighted = isActiveInPane1 || isActiveInPane2;
+                
+                return (
+                  <button 
+                    key={type}
+                    onClick={() => {
+                      if (!isHighlighted) setPaneType(type);
+                      else if (isActiveInPane1) setActivePaneId(1);
+                      else if (isActiveInPane2) setActivePaneId(2);
+                    }} 
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${isHighlighted ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    {labels[type]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-4">
+            <button onClick={toggleUserMute} className={`p-2 rounded-full transition-colors ${isUserMuted ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`} title={isUserMuted ? 'Slå på mikrofon' : 'Stäng av mikrofon'}>
+              {isUserMuted ? <MicOff size={18} /> : <Mic size={18} />}
+            </button>
+            <button onClick={toggleTeacherMute} className={`p-2 rounded-full transition-colors ${isTeacherMuted ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`} title={isTeacherMuted ? 'Slå på AI:ns röst' : 'Stäng av AI:ns röst'}>
+              {isTeacherMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+            </button>
+          </div>
+        </div>
+
+        {/* Panes Area */}
+        <div className="flex-1 flex flex-col sm:flex-row p-4 gap-4 overflow-hidden bg-slate-100">
+          {renderPane(pane1, activePaneId === 1, () => setActivePaneId(1))}
+          {renderPane(pane2, activePaneId === 2, () => setActivePaneId(2))}
+        </div>
+      </div>
+
+      {/* Overlay for mobile sidebar */}
+      {sidebarOpen && !isPinned && (
+        <div 
+          className="fixed inset-0 bg-black/20 z-40 lg:hidden backdrop-blur-sm"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
     </div>
   );
 }
