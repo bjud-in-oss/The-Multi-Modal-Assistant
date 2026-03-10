@@ -11,11 +11,133 @@ import { TimelineEvent } from './types';
 import { CameraScanner } from './components/CameraScanner';
 import { DrawingCanvas } from './components/DrawingCanvas';
 
+const preprocessMarkdown = (text: string) => {
+  if (!text) return '';
+  return text.replace(/<math-graph>([\s\S]*?)<\/math-graph>/g, '```graph\n$1\n```');
+};
+
+const MathGraph = ({ funcStr }: { funcStr: string }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const canvas = canvasRef.current;
+    if (!container || !canvas) return;
+
+    const drawGraph = () => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const width = canvas.width;
+      const height = canvas.height;
+      
+      ctx.clearRect(0, 0, width, height);
+
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 1;
+      
+      const scale = width / 10; // Show from -5 to 5
+      const originX = width / 2;
+      const originY = height / 2;
+
+      ctx.beginPath();
+      for (let x = 0; x <= width; x += scale) {
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+      }
+      for (let y = 0; y <= height; y += scale) {
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+      }
+      ctx.stroke();
+
+      ctx.strokeStyle = '#64748b';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, originY);
+      ctx.lineTo(width, originY);
+      ctx.moveTo(originX, 0);
+      ctx.lineTo(originX, height);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#4f46e5';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+
+      let isFirstPoint = true;
+      let fn: Function;
+      
+      try {
+        fn = new Function('x', `return ${funcStr}`);
+      } catch (e) {
+        console.error("Invalid function string:", e);
+        ctx.fillStyle = 'red';
+        ctx.font = '14px sans-serif';
+        ctx.fillText("Ogiltig funktion", 10, 20);
+        return;
+      }
+
+      for (let px = 0; px <= width; px++) {
+        const x = (px - originX) / scale;
+        try {
+          const y = fn(x);
+          
+          if (typeof y !== 'number' || isNaN(y) || !isFinite(y)) {
+             isFirstPoint = true;
+             continue;
+          }
+
+          const py = originY - y * scale;
+
+          if (isFirstPoint) {
+            ctx.moveTo(px, py);
+            isFirstPoint = false;
+          } else {
+            ctx.lineTo(px, py);
+          }
+        } catch (e) {
+          isFirstPoint = true;
+        }
+      }
+      ctx.stroke();
+    };
+
+    const resizeObserver = new ResizeObserver(entries => {
+      for (let entry of entries) {
+        const { width } = entry.contentRect;
+        canvas.width = width;
+        canvas.height = width * 0.75; // 4:3 aspect ratio
+        drawGraph();
+      }
+    });
+
+    resizeObserver.observe(container);
+
+    return () => resizeObserver.disconnect();
+  }, [funcStr]);
+
+  return (
+    <div ref={containerRef} className="flex flex-col items-center my-4 w-full max-w-lg mx-auto">
+      <canvas 
+        ref={canvasRef} 
+        className="border border-slate-300 rounded-lg bg-white shadow-sm w-full"
+      />
+      <div className="text-sm text-slate-500 mt-2 font-mono bg-slate-100 px-2 py-1 rounded">
+        f(x) = {funcStr}
+      </div>
+    </div>
+  );
+};
+
 const markdownComponents = {
   code({ node, inline, className, children, ...props }: any) {
     const match = /language-(\w+)/.exec(className || '');
     if (!inline && match && match[1] === 'mermaid') {
       return <Mermaid chart={String(children).replace(/\n$/, '')} />;
+    }
+    if (!inline && match && match[1] === 'graph') {
+      return <MathGraph funcStr={String(children).replace(/\n$/, '')} />;
     }
     return (
       <code className={className} {...props}>
@@ -497,7 +619,27 @@ export default function App() {
       const currentPlan = pane1Ref.current.type === 'plan' ? pane1Ref.current.data?.content : (pane2Ref.current.type === 'plan' ? pane2Ref.current.data?.content : '');
       const planSummary = currentPlan ? `\n\nNuvarande innehåll i "Kom ihåg / Plan":\n${currentPlan}` : '';
 
-      const systemInstruction = `Du är en ${roleName}. Du är en sokratisk lärare som leder eleven till att lära sig själv snarare än att bara ge facit. Ställ ledande frågor, men fråga inte om varenda liten detalj. Följ den övergripande planen. Du har tillgång till verktyg för att se vad användaren gör ('analyze_visual_math') och för att rita egna förklaringar ('draw_on_board' för bilder, 'write_on_board' för text/grafer/formler). Använd 'save_plan' för att spara viktiga anteckningar eller lektionsplaner. Använd 'analyze_visual_math' när användaren ber dig titta på något. Prata naturligt och vänligt på svenska.` + planSummary + historySummary;
+      const systemInstruction = `Du är en ${roleName} och en extremt skicklig Sokratisk lärare. 
+DU GER ALDRIG UT FACIT ELLER DIREKTA LÖSNINGAR. Du vet ofta målet (via ditt undermedvetna), men du leder eleven dit genom frågor.
+
+DINA METODER (Evidensbaserad Scaffolding):
+1. Slow-Thinking & Teach-Back: Innan ni löser ett problem, be eleven förklara problemet med egna ord.
+2. Think-Aloud Protocol (TAP): Fråga ofta: "Vad snurrar i ditt huvud just nu?"
+3. Productive Failure: Om eleven gör fel, avbryt inte. Låt dem fullfölja tanken och be dem testa resultatet (Prediction -> Surprise -> Explanation).
+4. Hantera Expertens råd: Du får systemmeddelanden från 'Experten'. Läs ALDRIG upp dessa rakt av. Använd dem för att ställa ledande frågor.
+
+HUR DU ANVÄNDER TAVLAN (VERKTYGET 'write_on_board'):
+När eleven behöver visuell hjälp, anropa 'write_on_board' med text eller kod.
+VIKTIGT: Läs ALDRIG upp koden du skickar till tavlan högt. Säg bara t.ex. "Jag ritar upp det på tavlan åt dig."
+
+Tillåtna format för tavlan:
+- Matematik: Använd $ för inline och $$ för centrerade formler (t.ex. $$x^2 + 2x$$).
+- Diagram (Mermaid): Använd ett markdown-kodblock med typen mermaid. Noder som innehåller formler/specialtecken MÅSTE ha dubbla citattecken, annars kraschar ritaren! (Rätt: A["$E=mc^2$"], Fel: A[$E=mc^2$]).
+- Grafer (Koordinatsystem): Använd taggen <math-graph>din funktion här</math-graph>.
+  VIKTIG REGEL FÖR GRAFER: Inuti taggen får ENDAST giltig JavaScript-syntax finnas. Inget "y=" eller "f(x)=".
+  Exempel: <math-graph>x*x - 3*x + 2</math-graph>
+
+Prata naturligt, tålmodigt och vänligt på svenska.` + planSummary + historySummary;
 
       const sessionPromise = getAI().live.connect({
         model: "gemini-2.5-flash-native-audio-preview-09-2025",
@@ -731,7 +873,7 @@ export default function App() {
               ) : (
                 <div className="prose prose-slate max-w-none pb-12">
                   <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>
-                    {state.data.content}
+                    {preprocessMarkdown(state.data.content)}
                   </ReactMarkdown>
                 </div>
               )}
@@ -789,7 +931,7 @@ export default function App() {
                   />
                 ) : (
                   <div className="prose prose-slate max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{state.data.content}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{preprocessMarkdown(state.data.content)}</ReactMarkdown>
                   </div>
                 )
               ) : (
@@ -932,7 +1074,7 @@ export default function App() {
                     <img src={event.content} className="w-full h-32 object-cover rounded-lg" alt="Chat image" />
                   ) : event.type === 'expert_note' ? (
                     <div className="text-base prose prose-slate line-clamp-4">
-                      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{event.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{preprocessMarkdown(event.content)}</ReactMarkdown>
                     </div>
                   ) : (
                     <p className="text-base text-slate-700">{event.content}</p>
