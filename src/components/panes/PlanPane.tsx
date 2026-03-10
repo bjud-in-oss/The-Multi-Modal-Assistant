@@ -5,7 +5,7 @@ import { MarkdownRenderer } from '../MarkdownRenderer';
 interface PlanPaneProps {
   state: any;
   planScrollRef: React.RefObject<HTMLDivElement>;
-  handlePlanScroll: () => void;
+  handlePlanScroll: (e: React.UIEvent<HTMLDivElement>) => void;
   isEditingPlan: boolean;
   setIsEditingPlan: (val: boolean) => void;
   editedPlan: string;

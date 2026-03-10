@@ -5,3 +5,11 @@ export type TimelineEvent = {
   source?: 'typed' | 'spoken';
   content: string;
 };
+
+export type PaneType = 'draw' | 'camera' | 'board' | 'plan';
+
+export type PaneState = {
+  id: 1 | 2;
+  type: PaneType;
+  data?: any;
+};

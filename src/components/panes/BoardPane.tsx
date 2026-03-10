@@ -7,7 +7,7 @@ interface BoardPaneProps {
   isActive: boolean;
   isProcessing: boolean;
   boardScrollRef: React.RefObject<HTMLDivElement>;
-  handleBoardScroll: () => void;
+  handleBoardScroll: (e: React.UIEvent<HTMLDivElement>) => void;
   showScrollButton: boolean;
   scrollToBoardBottom: () => void;
 }
