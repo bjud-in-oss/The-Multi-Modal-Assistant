@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { GoogleGenAI, FunctionDeclaration, Type, Modality } from '@google/genai';
-import { TimelineEvent, PaneState } from '../types';
+import { TimelineEvent, PaneState, PaneType } from '../types';
 
 export const useLiveSession = (
   getAI: () => GoogleGenAI,
@@ -11,6 +11,7 @@ export const useLiveSession = (
   pane1Ref: React.MutableRefObject<PaneState>,
   pane2Ref: React.MutableRefObject<PaneState>,
   showInInactivePane: (type: 'board' | 'plan', data: any, forceActive?: boolean) => void,
+  clearPane: (type: PaneType) => void,
   callVisionAPI: (question: string, base64Images: string[], thinkingLevel?: string) => Promise<string>,
   generateTeacherImage: (prompt: string) => Promise<string>,
   isTeacherMutedRef: React.MutableRefObject<boolean>,
@@ -124,6 +125,17 @@ export const useLiveSession = (
         }
       };
 
+      const clearBoardDeclaration: FunctionDeclaration = {
+        name: 'clear_board',
+        description: 'Använd för att rensa tavlan när den blir för full eller när ni byter ämne.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            reason: { type: Type.STRING, description: 'Anledningen till att tavlan rensas.' }
+          }
+        }
+      };
+
       const historySummary = timelineRef.current.length > 0 
         ? `\n\nTidigare i konversationen har ni pratat om:\n` + timelineRef.current.map(e => {
             if (e.type === 'expert_note') return `Expert/System: ${e.content}`;
@@ -139,17 +151,19 @@ export const useLiveSession = (
       const currentPlan = pane1Ref.current.type === 'plan' ? pane1Ref.current.data?.content : (pane2Ref.current.type === 'plan' ? pane2Ref.current.data?.content : '');
       const planSummary = currentPlan ? `\n\nNuvarande innehåll i "Kom ihåg / Plan":\n${currentPlan}` : '';
 
-      const systemInstruction = `Du är en ${roleName} och en extremt skicklig Sokratisk lärare. 
-DU GER ALDRIG UT FACIT ELLER DIREKTA LÖSNINGAR. Du vet ofta målet (via ditt undermedvetna), men du leder eleven dit genom frågor.
+      // UPPDATERAD SYSTEMPROMPT
+      const systemInstruction = `Du är en ${roleName} och en anpassningsbar, lyhörd och hjälpsam assistent. 
+Din uppgift är att hjälpa användaren på det sätt som passar dem bäst just nu. Du är INTE en stelbent robot, utan en flexibel och empatisk pedagog.
 
-DINA METODER (Evidensbaserad Scaffolding):
-1. Slow-Thinking & Teach-Back: Innan ni löser ett problem, be eleven förklara problemet med egna ord.
-2. Think-Aloud Protocol (TAP): Fråga ofta: "Vad snurrar i ditt huvud just nu?"
-3. Productive Failure: Om eleven gör fel, avbryt inte. Låt dem fullfölja tanken och be dem testa resultatet (Prediction -> Surprise -> Explanation).
-4. Hantera Expertens råd: Du får systemmeddelanden från 'Experten'. Läs ALDRIG upp dessa rakt av. Använd dem för att ställa ledande frågor.
+DINA RIKTLINJER:
+1. Anpassa din stil: Om användaren vill tänka själv, ställ ledande frågor. Om användaren är frustrerad, tycker det är svårt, eller ber om ett direkt svar – GE DIREKTA OCH TYDLIGA SVAR. Tvinga aldrig fram en gissningslek om användaren inte vill.
+2. Var empatisk och naturlig: Lyssna in användarens tonläge. Om de tycker det är tufft, var uppmuntrande och förenkla din förklaring.
+3. Undvik stelbenta avslag: Försök alltid hjälpa till. Om du måste rätta användaren, gör det mjukt och konstruktivt.
+4. Hantera Expertens råd: Du får ibland systemmeddelanden från 'Experten'. Använd denna information för att ge bättre svar, och väv in det naturligt i ditt tal.
 
-HUR DU ANVÄNDER TAVLAN (VERKTYGET 'write_on_board'):
+HUR DU ANVÄNDER TAVLAN (VERKTYGET 'write_on_board' och 'clear_board'):
 När eleven behöver visuell hjälp, anropa 'write_on_board'.
+Om tavlan blir för full eller ni byter ämne, anropa 'clear_board' för att rensa den.
 REGLER:
 1. Skicka ENDAST själva koden/formeln till tavlan (LaTeX, \`\`\`mermaid eller <math-graph>). Skriv INGEN vanlig text eller förklaringar i verktyget.
 2. Din pedagogiska förklaring av grafen/formeln ska du SÄGA muntligt med din röst.
@@ -157,7 +171,7 @@ REGLER:
 
 Tillåtna format för tavlan:
 - Matematik: Använd $ för inline och $$ för centrerade formler (t.ex. $$x^2 + 2x$$).
-- Diagram (Mermaid): Använd ett markdown-kodblock med typen mermaid. Noder som innehåller formler/specialtecken MÅSTE ha dubbla citattecken, annars kraschar ritaren! (Rätt: A["$E=mc^2$"], Fel: A[$E=mc^2$]).
+- Diagram (Mermaid): Använd ett markdown-kodblock med typen 'mermaid'. Noder som innehåller formler/specialtecken MÅSTE ha dubbla citattecken, annars kraschar ritaren! (Rätt: A["$E=mc^2$"], Fel: A[$E=mc^2$]).
 - Grafer (Koordinatsystem): Använd taggen <math-graph>din funktion här</math-graph>.
   VIKTIG REGEL FÖR GRAFER: Inuti taggen får ENDAST giltig JavaScript-syntax finnas. Inget "y=" eller "f(x)=".
   Exempel: <math-graph>x*x - 3*x + 2</math-graph>
@@ -169,7 +183,7 @@ Prata naturligt, tålmodigt och vänligt på svenska.` + planSummary + historySu
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: systemInstruction,
-          tools: [{ functionDeclarations: [analyzeVisualMathDeclaration, drawOnBoardDeclaration, savePlanDeclaration, writeOnBoardDeclaration] }],
+          tools: [{ functionDeclarations: [analyzeVisualMathDeclaration, drawOnBoardDeclaration, savePlanDeclaration, writeOnBoardDeclaration, clearBoardDeclaration] }],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } } },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
@@ -279,6 +293,10 @@ Prata naturligt, tålmodigt och vänligt på svenska.` + planSummary + historySu
                     showInInactivePane('plan', { content: args.plan_content }, true);
                     addTimelineEvent('expert_note', 'Sparade en ny plan i "Kom ihåg".');
                     result = "Planen har sparats.";
+                  } else if (name === 'clear_board') {
+                    clearPane('board');
+                    addTimelineEvent('expert_note', 'Tavlan har rensats.');
+                    result = "Tavlan är nu tom.";
                   }
 
                   sessionPromise.then(session => {

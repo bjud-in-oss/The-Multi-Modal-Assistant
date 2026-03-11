@@ -80,6 +80,11 @@ export default function App() {
     setTimeline(prev => prev.filter(event => event.id !== id));
   }, []);
 
+  const clearPane = useCallback((type: PaneType) => {
+    setPane1(prev => prev.type === type ? { ...prev, data: null } : prev);
+    setPane2(prev => prev.type === type ? { ...prev, data: null } : prev);
+  }, []);
+
   const showInInactivePane = useCallback((type: PaneType, data: any, append: boolean = false) => {
     const p1 = pane1Ref.current;
     const p2 = pane2Ref.current;
@@ -127,6 +132,7 @@ export default function App() {
     pane1Ref,
     pane2Ref,
     showInInactivePane,
+    clearPane,
     callVisionAPI,
     generateTeacherImage,
     isTeacherMutedRef,
@@ -297,7 +303,7 @@ export default function App() {
            {isActive && <div className="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_8px_rgba(99,102,241,0.8)]" />}
         </div>
   
-        <div className="flex-1 relative bg-white">
+        <div className="flex-1 relative bg-white overflow-hidden">
           {state.type === 'draw' && <DrawingCanvas onCapture={(base64) => handleCapture(base64, 'draw')} selectedImage={state.data?.image} />}
           {state.type === 'camera' && <CameraScanner onCapture={(base64) => handleCapture(base64, 'camera')} onClose={() => {
             if (pane1.id === state.id) setPane1(prev => ({ ...prev, type: 'draw' }));
@@ -312,6 +318,7 @@ export default function App() {
               handleBoardScroll={handleBoardScroll}
               showScrollButton={showScrollButton}
               scrollToBoardBottom={scrollToBoardBottom}
+              clearBoard={() => clearPane('board')}
             />
           )}
           {state.type === 'plan' && (
