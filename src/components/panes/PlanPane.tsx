@@ -36,7 +36,7 @@ export const PlanPane: React.FC<PlanPaneProps> = ({
       className="h-full overflow-y-auto bg-slate-50 p-6 pt-10 flex flex-col gap-4 relative"
     >
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-bold text-slate-700">Kom ihåg / Plan</h3>
+        <h3 className="text-lg font-bold text-slate-700">Läroplan</h3>
         {state.data?.content && !isEditingPlan && (
           <button 
             onClick={() => {
@@ -44,7 +44,7 @@ export const PlanPane: React.FC<PlanPaneProps> = ({
               setIsEditingPlan(true);
             }}
             className="p-2 text-slate-500 hover:bg-slate-200 rounded-lg transition-colors"
-            title="Redigera plan"
+            title="Redigera läroplan"
           >
             <Edit3 size={18} />
           </button>
@@ -71,15 +71,9 @@ export const PlanPane: React.FC<PlanPaneProps> = ({
           </div>
         )
       ) : (
-        <>
-          <p className="text-slate-500 text-sm">Be AI:n att skapa en strukturerad plan för vad ni ska gå igenom, eller skriv dina egna anteckningar här.</p>
-          <button 
-            onClick={() => handleTextSend("Skapa en lektionsplan för detta ämne och spara den i Kom ihåg.")} 
-            className="bg-emerald-100 text-emerald-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-200 self-start"
-          >
-            Be om plan
-          </button>
-        </>
+        <div className="flex flex-col items-center justify-center h-full text-slate-400 text-center gap-4">
+          <p className="max-w-[250px] text-sm">Här sparas din läroplan och historik från tavlan. Du kan be AI:n att skriva här, eller lägga till egna anteckningar.</p>
+        </div>
       )}
       
       {showPlanScrollButton && state.data && (

@@ -19,8 +19,42 @@ export default function App() {
   const [selectedRole, setSelectedRole] = useState('Lärare');
   const [customRole, setCustomRole] = useState('');
   
-  const [pane1, setPane1] = useState<PaneState>({ id: 1, type: 'draw' });
-  const [pane2, setPane2] = useState<PaneState>({ id: 2, type: 'board' });
+  const [pane1, setPane1] = useState<PaneState>(() => {
+    try {
+      const saved = localStorage.getItem('ai_tutor_pane1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.data) {
+          let content = parsed.data.content;
+          if (content !== null && typeof content === 'object') {
+            parsed.data.content = content.text ? String(content.text) : JSON.stringify(content);
+          } else if (content !== undefined) {
+            parsed.data.content = String(content);
+          }
+        }
+        return parsed || { id: 1, type: 'draw' };
+      }
+    } catch (e) {}
+    return { id: 1, type: 'draw' };
+  });
+  const [pane2, setPane2] = useState<PaneState>(() => {
+    try {
+      const saved = localStorage.getItem('ai_tutor_pane2');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.data) {
+          let content = parsed.data.content;
+          if (content !== null && typeof content === 'object') {
+            parsed.data.content = content.text ? String(content.text) : JSON.stringify(content);
+          } else if (content !== undefined) {
+            parsed.data.content = String(content);
+          }
+        }
+        return parsed || { id: 2, type: 'board' };
+      }
+    } catch (e) {}
+    return { id: 2, type: 'board' };
+  });
   const [activePaneId, setActivePaneId] = useState<1 | 2>(1);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
@@ -32,7 +66,29 @@ export default function App() {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showPlanScrollButton, setShowPlanScrollButton] = useState(false);
 
-  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [timeline, setTimeline] = useState<TimelineEvent[]>(() => {
+    try {
+      const saved = localStorage.getItem('ai_tutor_timeline');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.map((e: any) => {
+            let content = e.content;
+            if (content !== null && typeof content === 'object') {
+              content = content.text ? String(content.text) : JSON.stringify(content);
+            } else {
+              content = String(content || '');
+            }
+            return { ...e, content };
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load timeline", e);
+    }
+    return [];
+  });
+
   const [isTeacherMuted, setIsTeacherMuted] = useState(true);
   const [isUserMuted, setIsUserMuted] = useState(false);
 
@@ -55,25 +111,71 @@ export default function App() {
   }, [activePaneId]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem('ai_tutor_pane1', JSON.stringify(pane1));
+    } catch (e) {}
     pane1Ref.current = pane1;
   }, [pane1]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem('ai_tutor_pane2', JSON.stringify(pane2));
+    } catch (e) {}
     pane2Ref.current = pane2;
   }, [pane2]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem('ai_tutor_timeline', JSON.stringify(timeline));
+    } catch (e) {
+      console.error("Failed to save timeline", e);
+    }
     timelineRef.current = timeline;
   }, [timeline]);
 
   const addTimelineEvent = useCallback((type: TimelineEvent['type'], content: string, source?: 'typed' | 'spoken') => {
-    setTimeline(prev => [...prev, {
-      id: Date.now().toString() + Math.random().toString(),
-      timestamp: Date.now(),
-      type,
-      content,
-      source
-    }]);
+    setTimeline(prev => {
+      const last = prev[prev.length - 1];
+      
+      const isStreamable = (type === 'teacher_text') || (type === 'user_text' && source === 'spoken');
+      
+      const safeContent = typeof content === 'string' ? content : 
+                         (content !== null && typeof content === 'object' && (content as any).text ? String((content as any).text) : String(content || ''));
+      
+      if (isStreamable && last && last.type === type && last.source === source) {
+        const timeDiff = Date.now() - last.timestamp;
+        if (timeDiff < 5000) {
+          const newTimeline = [...prev];
+          
+          const safeLastContent = typeof last.content === 'string' ? last.content : 
+                                 (last.content !== null && typeof last.content === 'object' && (last.content as any).text ? String((last.content as any).text) : String(last.content || ''));
+          
+          let newContent = safeContent;
+          if (safeContent.startsWith(safeLastContent)) {
+            newContent = safeContent;
+          } else if (safeLastContent.startsWith(safeContent)) {
+            newContent = safeLastContent;
+          } else {
+            newContent = safeLastContent + safeContent;
+          }
+          
+          newTimeline[newTimeline.length - 1] = {
+            ...last,
+            content: newContent,
+            timestamp: Date.now()
+          };
+          return newTimeline;
+        }
+      }
+      
+      return [...prev, {
+        id: Date.now().toString() + Math.random().toString(),
+        timestamp: Date.now(),
+        type,
+        content: safeContent,
+        source
+      }];
+    });
   }, []);
 
   const deleteTimelineEvent = useCallback((id: string) => {
@@ -298,7 +400,7 @@ export default function App() {
              {state.type === 'draw' && 'Rita'}
              {state.type === 'camera' && 'Fota'}
              {state.type === 'board' && 'Tavla'}
-             {state.type === 'plan' && 'Kom ihåg'}
+             {state.type === 'plan' && 'Läroplan'}
            </span>
            {isActive && <div className="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_8px_rgba(99,102,241,0.8)]" />}
         </div>
@@ -433,7 +535,7 @@ export default function App() {
             </button>
             <div className="flex bg-slate-100 p-1 rounded-xl shrink-0">
               {(['draw', 'camera', 'board', 'plan'] as PaneType[]).map(type => {
-                const labels = { draw: 'Rita', camera: 'Fota', board: 'Tavla', plan: 'Kom ihåg' };
+                const labels = { draw: 'Rita', camera: 'Fota', board: 'Tavla', plan: 'Läroplan' };
                 const isActiveInPane1 = pane1.type === type;
                 const isActiveInPane2 = pane2.type === type;
                 const isHighlighted = isActiveInPane1 || isActiveInPane2;
@@ -454,19 +556,22 @@ export default function App() {
               })}
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0 ml-4">
-            <button onClick={toggleUserMute} className={`p-2 rounded-full transition-colors ${isUserMuted ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`} title={isUserMuted ? 'Slå på mikrofon' : 'Stäng av mikrofon'}>
-              {isUserMuted ? <MicOff size={18} /> : <Mic size={18} />}
-            </button>
-            <button onClick={toggleTeacherMute} className={`p-2 rounded-full transition-colors ${isTeacherMuted ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`} title={isTeacherMuted ? 'Slå på AI:ns röst' : 'Stäng av AI:ns röst'}>
-              {isTeacherMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-            </button>
-          </div>
         </div>
 
         {/* Panes Area */}
-        <div className="flex-1 flex flex-col sm:flex-row p-4 gap-4 overflow-hidden bg-slate-100">
+        <div className="flex-1 flex flex-col sm:flex-row p-4 gap-4 overflow-hidden bg-slate-100 relative">
           {renderPane(pane1, activePaneId === 1, () => setActivePaneId(1))}
+          
+          {/* Mute buttons in the middle */}
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex sm:flex-col gap-2 z-30 bg-slate-100/80 p-2 rounded-full backdrop-blur-sm shadow-sm border border-slate-200">
+            <button onClick={toggleUserMute} className={`p-3 rounded-full shadow-md transition-colors ${isUserMuted ? 'bg-rose-100 text-rose-600' : 'bg-white text-slate-600 hover:bg-slate-50'}`} title={isUserMuted ? 'Slå på mikrofon' : 'Stäng av mikrofon'}>
+              {isUserMuted ? <MicOff size={20} /> : <Mic size={20} />}
+            </button>
+            <button onClick={toggleTeacherMute} className={`p-3 rounded-full shadow-md transition-colors ${isTeacherMuted ? 'bg-rose-100 text-rose-600' : 'bg-white text-slate-600 hover:bg-slate-50'}`} title={isTeacherMuted ? 'Slå på AI:ns röst' : 'Stäng av AI:ns röst'}>
+              {isTeacherMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+            </button>
+          </div>
+
           {renderPane(pane2, activePaneId === 2, () => setActivePaneId(2))}
         </div>
       </div>

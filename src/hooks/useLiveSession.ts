@@ -2,6 +2,24 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { GoogleGenAI, FunctionDeclaration, Type, Modality } from '@google/genai';
 import { TimelineEvent, PaneState, PaneType } from '../types';
 
+const fixEncoding = (text: any) => {
+  if (!text) return '';
+  if (typeof text === 'object') {
+    text = text.text ? String(text.text) : JSON.stringify(text);
+  }
+  if (typeof text !== 'string') {
+    text = String(text);
+  }
+  try {
+    if (text.includes('Ã')) {
+      return decodeURIComponent(escape(text));
+    }
+    return text;
+  } catch (e) {
+    return text;
+  }
+};
+
 export const useLiveSession = (
   getAI: () => GoogleGenAI,
   timelineRef: React.MutableRefObject<TimelineEvent[]>,
@@ -107,7 +125,7 @@ export const useLiveSession = (
 
       const savePlanDeclaration: FunctionDeclaration = {
         name: 'save_plan',
-        description: 'Använd för att spara en lektionsplan, minnesanteckningar eller en sammanfattning till användarens "Kom ihåg"-flik.',
+        description: 'Använd för att spara en lektionsplan, minnesanteckningar eller en sammanfattning till användarens "Läroplan"-flik.',
         parameters: {
           type: Type.OBJECT,
           properties: { plan_content: { type: Type.STRING, description: 'Innehållet som ska sparas (Markdown).' } },
@@ -149,7 +167,7 @@ export const useLiveSession = (
       const roleName = roleRef.current === 'Annan' ? customRoleRef.current : roleRef.current;
       
       const currentPlan = pane1Ref.current.type === 'plan' ? pane1Ref.current.data?.content : (pane2Ref.current.type === 'plan' ? pane2Ref.current.data?.content : '');
-      const planSummary = currentPlan ? `\n\nNuvarande innehåll i "Kom ihåg / Plan":\n${currentPlan}` : '';
+      const planSummary = currentPlan ? `\n\nNuvarande innehåll i "Läroplan":\n${currentPlan}` : '';
 
       // UPPDATERAD SYSTEMPROMPT
       const systemInstruction = `Du är en ${roleName} och en anpassningsbar, lyhörd och hjälpsam assistent. 
@@ -162,16 +180,19 @@ DINA RIKTLINJER:
 4. Hantera Expertens råd: Du får ibland systemmeddelanden från 'Experten'. Använd denna information för att ge bättre svar, och väv in det naturligt i ditt tal.
 
 HUR DU ANVÄNDER TAVLAN (VERKTYGET 'write_on_board' och 'clear_board'):
-När eleven behöver visuell hjälp, anropa 'write_on_board'.
+När eleven ber dig skriva, rita eller visa något på tavlan MÅSTE du anropa 'write_on_board'.
+Du kan skriva vanlig text, punktlistor, formler, diagram och grafer på tavlan.
 Om tavlan blir för full eller ni byter ämne, anropa 'clear_board' för att rensa den.
-REGLER:
-1. Skicka ENDAST själva koden/formeln till tavlan (LaTeX, \`\`\`mermaid eller <math-graph>). Skriv INGEN vanlig text eller förklaringar i verktyget.
-2. Din pedagogiska förklaring av grafen/formeln ska du SÄGA muntligt med din röst.
-3. Läs ALDRIG upp själva syntaxen/koden högt.
+
+REGLER FÖR TAVLAN:
+1. Du FÅR skriva vanlig text och förklaringar på tavlan om användaren ber om det eller om det hjälper förklaringen.
+2. Din pedagogiska förklaring ska du SÄGA muntligt med din röst, men du kan också skriva stödord på tavlan.
+3. Läs ALDRIG upp själva syntaxen/koden (t.ex. LaTeX-kod eller Mermaid-kod) högt.
 
 Tillåtna format för tavlan:
+- Text: Vanlig text, punktlistor, fetstil (Markdown).
 - Matematik: Använd $ för inline och $$ för centrerade formler (t.ex. $$x^2 + 2x$$).
-- Diagram (Mermaid): Använd ett markdown-kodblock med typen 'mermaid'. Noder som innehåller formler/specialtecken MÅSTE ha dubbla citattecken, annars kraschar ritaren! (Rätt: A["$E=mc^2$"], Fel: A[$E=mc^2$]).
+- Diagram (Mermaid): Använd ett markdown-kodblock med typen 'mermaid'. Noder som innehåller formler/specialtecken MÅSTE ha dubbla citattecken! (Rätt: A["$E=mc^2$"], Fel: A[$E=mc^2$]).
 - Grafer (Koordinatsystem): Använd taggen <math-graph>din funktion här</math-graph>.
   VIKTIG REGEL FÖR GRAFER: Inuti taggen får ENDAST giltig JavaScript-syntax finnas. Inget "y=" eller "f(x)=".
   Exempel: <math-graph>x*x - 3*x + 2</math-graph>
@@ -213,11 +234,12 @@ Prata naturligt, tålmodigt och vänligt på svenska.` + planSummary + historySu
             const source = audioCtxRef.current!.createMediaStreamSource(streamRef.current!);
             const processor = audioCtxRef.current!.createScriptProcessor(4096, 1, 1);
             processor.onaudioprocess = (e) => {
-              if (isUserMutedRef.current) return;
               const inputData = e.inputBuffer.getChannelData(0);
               const pcm16 = new Int16Array(inputData.length);
-              for (let i = 0; i < inputData.length; i++) {
-                pcm16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+              if (!isUserMutedRef.current) {
+                for (let i = 0; i < inputData.length; i++) {
+                  pcm16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                }
               }
               const base64 = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)));
               sessionPromise.then(session => {
@@ -273,7 +295,7 @@ Prata naturligt, tålmodigt och vänligt på svenska.` + planSummary + historySu
             if (modelParts) {
               for (const part of modelParts) {
                 if (part.text) {
-                  addTimelineEvent('teacher_text', part.text);
+                  addTimelineEvent('teacher_text', fixEncoding(part.text));
                 }
                 if (part.functionCall) {
                   const name = part.functionCall.name;
@@ -286,12 +308,15 @@ Prata naturligt, tålmodigt och vänligt på svenska.` + planSummary + historySu
                   } else if (name === 'draw_on_board') {
                     result = await generateTeacherImage(args.prompt);
                   } else if (name === 'write_on_board') {
-                    showInInactivePane('board', { content: args.content, isAnalysis: true }, true);
-                    addTimelineEvent('expert_note', args.content);
-                    result = "Innehållet har skrivits på tavlan.";
+                    const content = fixEncoding(args.content);
+                    showInInactivePane('board', { content, isAnalysis: true }, false); // Overwrite board
+                    showInInactivePane('plan', { content: `**Tavla (${new Date().toLocaleTimeString()}):**\n${content}` }, true); // Append to plan
+                    addTimelineEvent('expert_note', content);
+                    result = "Innehållet har skrivits på tavlan och sparats i läroplanen.";
                   } else if (name === 'save_plan') {
-                    showInInactivePane('plan', { content: args.plan_content }, true);
-                    addTimelineEvent('expert_note', 'Sparade en ny plan i "Kom ihåg".');
+                    const planContent = fixEncoding(args.plan_content);
+                    showInInactivePane('plan', { content: planContent }, true);
+                    addTimelineEvent('expert_note', 'Sparade en ny plan i "Läroplan".');
                     result = "Planen har sparats.";
                   } else if (name === 'clear_board') {
                     clearPane('board');
@@ -312,12 +337,20 @@ Prata naturligt, tålmodigt och vänligt på svenska.` + planSummary + historySu
               }
             }
             
-            const userTurns = message.clientContent?.turns;
+            // Handle explicit transcription fields if they exist
+            if (message.serverContent?.outputTranscription) {
+              addTimelineEvent('teacher_text', fixEncoding(message.serverContent.outputTranscription));
+            }
+            if (message.serverContent?.inputTranscription) {
+              addTimelineEvent('user_text', fixEncoding(message.serverContent.inputTranscription), 'spoken');
+            }
+            
+            const userTurns = message.clientContent?.turns || message.serverContent?.clientContent?.turns;
             if (userTurns) {
               for (const turn of userTurns) {
                 for (const part of turn.parts) {
                   if (part.text && !part.text.startsWith('[Systemmeddelande')) {
-                    addTimelineEvent('user_text', part.text, 'spoken');
+                    addTimelineEvent('user_text', fixEncoding(part.text), 'spoken');
                     if (isTeacherMutedRef.current) {
                       setIsTeacherMuted(false);
                       isTeacherMutedRef.current = false;

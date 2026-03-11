@@ -37,7 +37,7 @@ export const MathGraph = ({ funcStr }: { funcStr: string }) => {
       ctx.stroke();
 
       ctx.strokeStyle = '#64748b';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(0, originY);
       ctx.lineTo(width, originY);
@@ -46,14 +46,23 @@ export const MathGraph = ({ funcStr }: { funcStr: string }) => {
       ctx.stroke();
 
       ctx.strokeStyle = '#4f46e5';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 4;
       ctx.beginPath();
 
       let isFirstPoint = true;
       let fn: Function;
       
       try {
-        fn = new Function('x', `return ${funcStr}`);
+        let fnStr = funcStr.trim();
+        if (fnStr.startsWith('y=') || fnStr.startsWith('y =')) {
+          fnStr = fnStr.substring(fnStr.indexOf('=') + 1).trim();
+        } else if (fnStr.startsWith('f(x)=') || fnStr.startsWith('f(x) =')) {
+          fnStr = fnStr.substring(fnStr.indexOf('=') + 1).trim();
+        }
+        // Replace ^ with ** for JavaScript exponentiation
+        fnStr = fnStr.replace(/\^/g, '**');
+        
+        fn = new Function('x', `return ${fnStr}`);
       } catch (e) {
         console.error("Invalid function string:", e);
         ctx.fillStyle = 'red';
