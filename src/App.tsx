@@ -318,18 +318,19 @@ export default function App() {
       isTeacherMutedRef.current = false;
     }
 
-    if (isLive && sessionRef.current) {
-      sessionRef.current.then((session: any) => {
-        session.sendRealtimeInput({ media: { mimeType: 'image/jpeg', data: base64.split(',')[1] } });
-      });
-    }
-
     const summary = await callVisionAPI("Användaren har precis ritat/visat detta. Analysera det.", [base64]);
     
     if (isLive && sessionRef.current) {
       sessionRef.current.then((session: any) => {
+        session.sendRealtimeInput({ media: { mimeType: 'image/jpeg', data: base64.split(',')[1] } });
         session.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text: `[Dolt systemmeddelande från Exper-analysatorn: ${summary}. Använd nu din röst för att ställa en metakognitiv fråga till eleven baserat på detta, och använd verktyget 'update_visual_engine' för att rita en röd markering (annotation) vid felet i bilden.]` }] }]
+          turns: [{ 
+            role: 'user', 
+            parts: [
+              { text: `[Dolt systemmeddelande från Exper-analysatorn: ${summary}. Använd nu din röst för att ställa en metakognitiv fråga till eleven baserat på detta, och använd verktyget 'update_visual_engine' för att rita en röd markering (annotation) vid felet i bilden.]` }
+            ] 
+          }],
+          turnComplete: true
         });
       });
     }

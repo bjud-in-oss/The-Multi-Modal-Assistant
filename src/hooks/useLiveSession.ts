@@ -28,7 +28,7 @@ export const useLiveSession = (
   customRoleRef: React.MutableRefObject<string>,
   pane1Ref: React.MutableRefObject<PaneState>,
   pane2Ref: React.MutableRefObject<PaneState>,
-  showInInactivePane: (type: 'board' | 'plan', data: any, forceActive?: boolean) => void,
+  showInInactivePane: (type: PaneType, data: any, forceActive?: boolean) => void,
   clearPane: (type: PaneType) => void,
   callVisionAPI: (question: string, base64Images: string[], thinkingLevel?: string) => Promise<string>,
   generateTeacherImage: (prompt: string) => Promise<string>,
@@ -218,6 +218,7 @@ REGLER FÖR TAVLAN:
 2. Din pedagogiska förklaring ska du ENBART SÄGA muntligt med din röst.
 3. Läs ALDRIG upp själva syntaxen/koden (t.ex. LaTeX-kod eller Mermaid-kod) högt.
 4. Använd 'update_visual_engine' för att placera små etiketter (annotations) eller LaTeX-formler (latexOverlays) direkt på elevens rit-yta, eller för att byta papperstyp (paperType: 'grid_math_paper', 'lined', 'blank').
+När du anropar 'update_visual_engine' för att rita ut 'annotations', kom ihåg att X och Y anges i PROCENT (0 till 100) av skärmens bredd och höjd. Till exempel: { x: 50, y: 50, text: '?' } placerar ett frågetecken exakt i mitten av skärmen.
 
 När du anropar 'update_visual_engine', uppdatera även 'curriculumNodes' med de koncept ni arbetar med (t.ex. id: 'addition', label: 'Addition', status: 'in-progress').
 
