@@ -329,7 +329,7 @@ export default function App() {
     if (isLive && sessionRef.current) {
       sessionRef.current.then((session: any) => {
         session.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text: `[Systemmeddelande: Experten har automatiskt analyserat användarens senaste bild och säger: ${summary} Agera på detta om det är relevant för er konversation.]` }] }],
+          turns: [{ role: 'user', parts: [{ text: `[Dolt systemmeddelande från Exper-analysatorn: ${summary}. Använd nu din röst för att ställa en metakognitiv fråga till eleven baserat på detta, och använd verktyget 'update_visual_engine' för att rita en röd markering (annotation) vid felet i bilden.]` }] }],
           turnComplete: true
         });
       });

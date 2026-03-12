@@ -50,19 +50,10 @@ export const useExpertAI = (
 
       // 2. Prepare the actual request
       parts.push({
-        text: `Du är "Experten", en snabb AI-assistent som stödjer en ${roleName}. Användaren frågar/säger: "${question}". Analysera detta${base64Images.length > 0 ? ' och bilderna' : ''}. Returnera ett JSON-objekt med: 1. "chat_message": Dina anteckningar/formler/svar (Markdown/LaTeX). Om du ritar grafer, använd Mermaid.js syntax inom markdown kodblock (t.ex. \`\`\`mermaid ... \`\`\`). 2. "live_summary": En kort sammanfattning till röst-AI:n. Svara på svenska och använd korrekt teckenkodning för å, ä, ö.`
+        text: `Du är "Experten", en snabb AI-assistent som stödjer en ${roleName}. Användaren frågar/säger: "${question}". Analysera detta${base64Images.length > 0 ? ' och bilderna' : ''}. Lös inte problemet för eleven. Returnera en kort instruktion till den handledande Röst-AIn om vilka misstag eleven gjort och vilken pedagogisk stöttning (ZPD) Röst-AIn bör använda.`
       });
 
-      const config: any = {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            chat_message: { type: Type.STRING },
-            live_summary: { type: Type.STRING }
-          }
-        }
-      };
+      const config: any = {};
 
       if (thinkingLevel === 'high' || thinkingLevel === 'low') {
         config.thinkingConfig = { thinkingLevel };
@@ -93,10 +84,7 @@ export const useExpertAI = (
 
       const resultText = response.text;
       if (resultText) {
-        const result = JSON.parse(resultText);
-        addTimelineEvent('expert_note', result.chat_message);
-        showInInactivePane('board', { content: result.chat_message, isAnalysis: true });
-        return result.live_summary;
+        return resultText;
       }
       return "Kunde inte analysera bilden.";
     } catch (error) {
