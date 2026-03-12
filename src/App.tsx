@@ -329,8 +329,7 @@ export default function App() {
     if (isLive && sessionRef.current) {
       sessionRef.current.then((session: any) => {
         session.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text: `[Dolt systemmeddelande från Exper-analysatorn: ${summary}. Använd nu din röst för att ställa en metakognitiv fråga till eleven baserat på detta, och använd verktyget 'update_visual_engine' för att rita en röd markering (annotation) vid felet i bilden.]` }] }],
-          turnComplete: true
+          turns: [{ role: 'user', parts: [{ text: `[Dolt systemmeddelande från Exper-analysatorn: ${summary}. Använd nu din röst för att ställa en metakognitiv fråga till eleven baserat på detta, och använd verktyget 'update_visual_engine' för att rita en röd markering (annotation) vid felet i bilden.]` }] }]
         });
       });
     }
@@ -482,24 +481,7 @@ export default function App() {
         setIsPinned={setIsPinned}
         sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen}
-        timeline={timeline}
-        deleteTimelineEvent={deleteTimelineEvent}
-        onEventClick={(event) => {
-          if (window.innerWidth < 1024 && !isPinned) setSidebarOpen(false);
-          if (event.type === 'user_image') {
-            setPaneType('draw');
-            if (activePaneId === 1) setPane1(prev => ({ ...prev, data: { image: event.content } }));
-            else setPane2(prev => ({ ...prev, data: { image: event.content } }));
-          } else if (event.type === 'teacher_image') {
-            setPaneType('board');
-            if (activePaneId === 1) setPane1(prev => ({ ...prev, data: { content: event.content, isAnalysis: false } }));
-            else setPane2(prev => ({ ...prev, data: { content: event.content, isAnalysis: false } }));
-          } else if (event.type === 'expert_note') {
-            setPaneType('board');
-            if (activePaneId === 1) setPane1(prev => ({ ...prev, data: { content: event.content, isAnalysis: true } }));
-            else setPane2(prev => ({ ...prev, data: { content: event.content, isAnalysis: true } }));
-          }
-        }}
+        curriculumNodes={curriculumNodes}
       />
 
       {/* Main Content */}
