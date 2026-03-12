@@ -11,7 +11,6 @@ interface PlanPaneProps {
   editedPlan: string;
   setEditedPlan: (val: string) => void;
   onSavePlan: (editedPlan: string) => void;
-  handleTextSend: (text: string) => void;
   showPlanScrollButton: boolean;
   scrollToPlanBottom: () => void;
 }
@@ -25,7 +24,6 @@ export const PlanPane: React.FC<PlanPaneProps> = ({
   editedPlan,
   setEditedPlan,
   onSavePlan,
-  handleTextSend,
   showPlanScrollButton,
   scrollToPlanBottom
 }) => {

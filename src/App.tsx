@@ -58,7 +58,10 @@ export default function App() {
   const [activePaneId, setActivePaneId] = useState<1 | 2>(1);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
-  const [chatInput, setChatInput] = useState('');
+  const [curriculumNodes, setCurriculumNodes] = useState<any[]>([]);
+  const [annotations, setAnnotations] = useState<any[]>([]);
+  const [latexOverlays, setLatexOverlays] = useState<any[]>([]);
+  const [paperType, setPaperType] = useState<string>('grid_math_paper');
   const [isEditingPlan, setIsEditingPlan] = useState(false);
   const [editedPlan, setEditedPlan] = useState('');
   const boardScrollRef = useRef<HTMLDivElement>(null);
@@ -241,7 +244,11 @@ export default function App() {
     setIsTeacherMuted,
     isUserMutedRef,
     setHasStarted,
-    setTimeline
+    setTimeline,
+    setCurriculumNodes,
+    setAnnotations,
+    setLatexOverlays,
+    setPaperType
   );
 
   const toggleTeacherMute = () => {
@@ -329,40 +336,6 @@ export default function App() {
     }
   }, [addTimelineEvent, resetInactivityTimer, callVisionAPI, ensureLiveSessionStarted, isLive, sessionRef]);
 
-  const handleTextSend = useCallback(async (text: string) => {
-    if (!text.trim()) return;
-    addTimelineEvent('user_text', text, 'typed');
-    setChatInput('');
-    resetInactivityTimer();
-    ensureLiveSessionStarted();
-
-    if (isTeacherMutedRef.current) {
-      setIsTeacherMuted(false);
-      isTeacherMutedRef.current = false;
-    }
-
-    if (isLive && sessionRef.current) {
-      sessionRef.current.then((session: any) => {
-        session.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text }] }],
-          turnComplete: true
-        });
-      });
-    }
-
-    const roleName = roleRef.current === 'Annan' ? customRoleRef.current : roleRef.current;
-    const summary = await callVisionAPI(`Användaren skrev precis detta: "${text}". Analysera det i kontexten av din roll som ${roleName}.`, []);
-    
-    if (isLive && sessionRef.current) {
-      sessionRef.current.then((session: any) => {
-        session.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text: `[Systemmeddelande: Experten har analyserat elevens text och säger: ${summary}]` }] }],
-          turnComplete: true
-        });
-      });
-    }
-  }, [addTimelineEvent, resetInactivityTimer, callVisionAPI, ensureLiveSessionStarted, isLive, sessionRef]);
-
   const handleStart = async () => {
     try {
       if (!audioCtxRef.current) {
@@ -406,7 +379,16 @@ export default function App() {
         </div>
   
         <div className="flex-1 relative bg-white overflow-hidden">
-          {state.type === 'draw' && <DrawingCanvas onCapture={(base64) => handleCapture(base64, 'draw')} selectedImage={state.data?.image} />}
+          {state.type === 'draw' && (
+            <DrawingCanvas 
+              onCapture={(base64) => handleCapture(base64, 'draw')} 
+              selectedImage={state.data?.image} 
+              paperType={paperType}
+              annotations={annotations}
+              latexOverlays={latexOverlays}
+              curriculumNodes={curriculumNodes}
+            />
+          )}
           {state.type === 'camera' && <CameraScanner onCapture={(base64) => handleCapture(base64, 'camera')} onClose={() => {
             if (pane1.id === state.id) setPane1(prev => ({ ...prev, type: 'draw' }));
             if (pane2.id === state.id) setPane2(prev => ({ ...prev, type: 'draw' }));
@@ -436,9 +418,7 @@ export default function App() {
                 if (activePaneId === 1) setPane1(prev => ({ ...prev, data: { ...prev.data, content: editedPlan } }));
                 else setPane2(prev => ({ ...prev, data: { ...prev.data, content: editedPlan } }));
                 setIsEditingPlan(false);
-                handleTextSend(`Jag har uppdaterat vår plan. Här är den nya versionen:\n\n${editedPlan}`);
               }}
-              handleTextSend={handleTextSend}
               showPlanScrollButton={showPlanScrollButton}
               scrollToPlanBottom={scrollToPlanBottom}
             />
@@ -520,9 +500,6 @@ export default function App() {
             else setPane2(prev => ({ ...prev, data: { content: event.content, isAnalysis: true } }));
           }
         }}
-        chatInput={chatInput}
-        setChatInput={setChatInput}
-        handleTextSend={handleTextSend}
       />
 
       {/* Main Content */}

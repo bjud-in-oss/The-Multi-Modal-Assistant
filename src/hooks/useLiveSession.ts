@@ -36,7 +36,11 @@ export const useLiveSession = (
   setIsTeacherMuted: (val: boolean) => void,
   isUserMutedRef: React.MutableRefObject<boolean>,
   setHasStarted: (val: boolean) => void,
-  setTimeline: (val: TimelineEvent[] | ((prev: TimelineEvent[]) => TimelineEvent[])) => void
+  setTimeline: (val: TimelineEvent[] | ((prev: TimelineEvent[]) => TimelineEvent[])) => void,
+  setCurriculumNodes: (val: any[] | ((prev: any[]) => any[])) => void,
+  setAnnotations: (val: any[] | ((prev: any[]) => any[])) => void,
+  setLatexOverlays: (val: any[] | ((prev: any[]) => any[])) => void,
+  setPaperType: (val: string) => void
 ) => {
   const [isLive, setIsLive] = useState(false);
   const isLiveRef = useRef(false);
@@ -154,6 +158,32 @@ export const useLiveSession = (
         }
       };
 
+      const updateVisualEngineDeclaration: FunctionDeclaration = {
+        name: 'update_visual_engine',
+        description: 'Använd för att uppdatera den visuella motorn (papperstyp, lägga till annotationer, LaTeX-överlägg eller kursplan-noder).',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            paperType: { type: Type.STRING, description: 'Typ av papper (t.ex. grid_math_paper, blank, lined)' },
+            annotations: { 
+              type: Type.ARRAY, 
+              items: { type: Type.OBJECT, properties: { x: { type: Type.NUMBER }, y: { type: Type.NUMBER }, text: { type: Type.STRING } } },
+              description: 'Lista med text-annotationer att placera på tavlan'
+            },
+            latexOverlays: { 
+              type: Type.ARRAY, 
+              items: { type: Type.OBJECT, properties: { x: { type: Type.NUMBER }, y: { type: Type.NUMBER }, latex: { type: Type.STRING } } },
+              description: 'Lista med LaTeX-formler att placera på tavlan'
+            },
+            curriculumNodes: {
+              type: Type.ARRAY,
+              items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, label: { type: Type.STRING }, status: { type: Type.STRING } } },
+              description: 'Lista med noder för kursplanen'
+            }
+          }
+        }
+      };
+
       const historySummary = timelineRef.current.length > 0 
         ? `\n\nTidigare i konversationen har ni pratat om:\n` + timelineRef.current.map(e => {
             if (e.type === 'expert_note') return `Expert/System: ${e.content}`;
@@ -179,8 +209,9 @@ DINA RIKTLINJER:
 3. Undvik stelbenta avslag: Försök alltid hjälpa till. Om du måste rätta användaren, gör det mjukt och konstruktivt.
 4. Hantera Expertens råd: Du får ibland systemmeddelanden från 'Experten'. Använd denna information för att ge bättre svar, och väv in det naturligt i ditt tal.
 
-HUR DU ANVÄNDER TAVLAN (VERKTYGET 'write_on_board' och 'clear_board'):
-När eleven ber dig skriva, rita eller visa något på tavlan MÅSTE du anropa 'write_on_board'.
+HUR DU ANVÄNDER TAVLAN (VERKTYGET 'write_on_board', 'clear_board' och 'update_visual_engine'):
+När eleven ber dig skriva en längre förklaring, rita ett diagram eller visa något stort på tavlan MÅSTE du anropa 'write_on_board'.
+Om eleven ber dig lägga till små anteckningar, formler eller ändra papperstyp på deras RIT-tavla (där de ritar), anropa 'update_visual_engine'.
 Du kan skriva vanlig text, punktlistor, formler, diagram och grafer på tavlan.
 Om tavlan blir för full eller ni byter ämne, anropa 'clear_board' för att rensa den.
 
@@ -188,6 +219,7 @@ REGLER FÖR TAVLAN:
 1. Du FÅR skriva vanlig text och förklaringar på tavlan om användaren ber om det eller om det hjälper förklaringen.
 2. Din pedagogiska förklaring ska du SÄGA muntligt med din röst, men du kan också skriva stödord på tavlan.
 3. Läs ALDRIG upp själva syntaxen/koden (t.ex. LaTeX-kod eller Mermaid-kod) högt.
+4. Använd 'update_visual_engine' för att placera små etiketter (annotations) eller LaTeX-formler (latexOverlays) direkt på elevens rit-yta, eller för att byta papperstyp (paperType: 'grid_math_paper', 'lined', 'blank').
 
 Tillåtna format för tavlan:
 - Text: Vanlig text, punktlistor, fetstil (Markdown).
@@ -204,7 +236,7 @@ Prata naturligt, tålmodigt och vänligt på svenska.` + planSummary + historySu
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: systemInstruction,
-          tools: [{ functionDeclarations: [analyzeVisualMathDeclaration, drawOnBoardDeclaration, savePlanDeclaration, writeOnBoardDeclaration, clearBoardDeclaration] }],
+          tools: [{ functionDeclarations: [analyzeVisualMathDeclaration, drawOnBoardDeclaration, savePlanDeclaration, writeOnBoardDeclaration, clearBoardDeclaration, updateVisualEngineDeclaration] }],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } } },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
@@ -315,13 +347,20 @@ Prata naturligt, tålmodigt och vänligt på svenska.` + planSummary + historySu
                     result = "Innehållet har skrivits på tavlan och sparats i läroplanen.";
                   } else if (name === 'save_plan') {
                     const planContent = fixEncoding(args.plan_content);
-                    showInInactivePane('plan', { content: planContent }, true);
+                    showInInactivePane('plan', { content: planContent }, false); // Overwrite plan
                     addTimelineEvent('expert_note', 'Sparade en ny plan i "Läroplan".');
                     result = "Planen har sparats.";
                   } else if (name === 'clear_board') {
                     clearPane('board');
                     addTimelineEvent('expert_note', 'Tavlan har rensats.');
                     result = "Tavlan är nu tom.";
+                  } else if (name === 'update_visual_engine') {
+                    if (args.paperType) setPaperType(args.paperType);
+                    if (args.annotations) setAnnotations(args.annotations);
+                    if (args.latexOverlays) setLatexOverlays(args.latexOverlays);
+                    if (args.curriculumNodes) setCurriculumNodes(args.curriculumNodes);
+                    showInInactivePane('draw', {}, false); // Switch to draw pane
+                    result = "Visuella motorn har uppdaterats.";
                   }
 
                   sessionPromise.then(session => {
